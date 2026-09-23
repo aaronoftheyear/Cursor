@@ -1,7 +1,8 @@
 import { Task } from './types';
 import { v4 as uuidv4 } from 'uuid';
+import { layaClient } from './laya';
 
-// JEV-style task routing rules
+// Fallback keyword-based routing rules (used when Laya is unavailable)
 interface RoutingRule {
   keywords: string[];
   agentId: string;
@@ -46,10 +47,61 @@ const ROUTING_RULES: RoutingRule[] = [
   { keywords: ['siri', 'shortcut', 'automation'], agentId: 'apple-intelligence', weight: 12 },
 ];
 
+// Agent descriptions for Laya
+const AGENT_DESCRIPTIONS: Record<string, string> = {
+  'cursor': 'AI-powered code editor. Best for coding tasks, refactoring, IDE integrations, and code completion.',
+  'grokbot': 'X/Twitter AI with real-time knowledge. Best for current events, social trends, and witty responses.',
+  'claude': 'General AI assistant. Excellent for analysis, writing, research, and thoughtful conversations.',
+  'claude-cowork': 'Collaborative AI for team workflows. Specialized in multi-agent coordination and handoffs.',
+  'claude-code': 'Software development specialist. Expert at architecture, debugging, code review, and git.',
+  'gemini': 'Multimodal AI. Strong at image understanding, search integration, and data analysis.',
+  'apple-intelligence': 'On-device AI. Best for privacy-focused tasks, Siri integration, and Apple ecosystem.',
+};
+
+export interface RoutingResult {
+  agentId: string;
+  confidence: number;
+  reasoning: string;
+  usedLaya: boolean;
+  latencyMs?: number;
+  allProbabilities?: Record<string, number>;
+}
+
 export class Orchestrator {
   private tasks: Task[] = [];
   
-  analyzeTask(description: string): { agentId: string; confidence: number; reasoning: string }[] {
+  async analyzeTaskWithLaya(description: string): Promise<RoutingResult[]> {
+    // Try Laya first
+    const agents = Object.entries(AGENT_DESCRIPTIONS).map(([id, desc]) => ({
+      id,
+      description: desc,
+    }));
+    
+    const layaResult = await layaClient.chooseAgent(description, agents);
+    
+    if (layaResult) {
+      // Convert Laya probabilities to rankings
+      const rankings = Object.entries(layaResult.probabilities)
+        .map(([agentId, prob]) => ({
+          agentId,
+          confidence: prob,
+          reasoning: agentId === layaResult.agentId 
+            ? `Laya selected (${Math.round(layaResult.confidence * 100)}% confidence)`
+            : `Laya probability: ${Math.round(prob * 100)}%`,
+          usedLaya: true,
+          latencyMs: layaResult.latencyMs,
+          allProbabilities: layaResult.probabilities,
+        }))
+        .sort((a, b) => b.confidence - a.confidence);
+      
+      return rankings;
+    }
+    
+    // Fallback to keyword-based routing
+    return this.analyzeTaskKeywords(description);
+  }
+  
+  analyzeTaskKeywords(description: string): RoutingResult[] {
     const lowerDesc = description.toLowerCase();
     const scores: Map<string, { score: number; matches: string[] }> = new Map();
     
@@ -74,10 +126,11 @@ export class Orchestrator {
     const rankings = Array.from(scores.entries())
       .map(([agentId, data]) => ({
         agentId,
-        confidence: Math.min(data.score / 30, 1), // Normalize to 0-1
+        confidence: Math.min(data.score / 30, 1),
         reasoning: data.matches.length > 0 
-          ? `Matched: ${data.matches.join(', ')}`
+          ? `Keyword matches: ${data.matches.join(', ')}`
           : 'No specific matches, general capability',
+        usedLaya: false,
       }))
       .sort((a, b) => b.confidence - a.confidence);
     
@@ -92,6 +145,11 @@ export class Orchestrator {
     }
     
     return rankings;
+  }
+  
+  // Synchronous version for backwards compatibility
+  analyzeTask(description: string): RoutingResult[] {
+    return this.analyzeTaskKeywords(description);
   }
   
   createTask(description: string): Task {
@@ -126,6 +184,10 @@ export class Orchestrator {
   
   getRecentTasks(limit: number = 10): Task[] {
     return this.tasks.slice(-limit);
+  }
+  
+  isLayaAvailable(): boolean {
+    return layaClient.isAvailable();
   }
 }
 

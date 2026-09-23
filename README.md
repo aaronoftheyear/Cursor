@@ -54,13 +54,36 @@ npm run build
 npm run electron
 ```
 
-## Task Orchestration
+## Task Orchestration with Laya
 
-The JEV-style orchestrator analyzes your task description and matches it against each agent's specialties. It considers:
+The dashboard uses **Laya** - the open-source, self-hosted alternative to Jev - for intelligent task routing. Laya provides:
+
+- **AI-powered decisions** with calibrated confidence scores
+- **~32ms latency** (vs ~250ms for hosted Jev)
+- **100% free** and self-hosted
+- **Multilingual support** (100+ languages)
+
+### Setting Up Laya
+
+```bash
+# Install Laya
+pip install laya-mcp
+
+# Start the Laya server (keeps model warm)
+laya-mcp serve
+
+# The dashboard will auto-detect Laya at http://127.0.0.1:8787
+```
+
+When Laya is running, the status bar shows "🧠 LAYA". Without Laya, it falls back to keyword-based routing ("🔑 Keywords").
+
+### Fallback Routing
+
+If Laya is unavailable, the dashboard uses keyword matching:
 
 - **Keywords**: Specific terms that map to agent capabilities
 - **Weighted scoring**: Some matches are stronger indicators than others
-- **Fallback logic**: If no clear match, defaults to Claude as a general-purpose assistant
+- **Fallback logic**: If no clear match, defaults to Claude as general-purpose
 
 ### Example Routing
 

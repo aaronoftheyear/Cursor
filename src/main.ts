@@ -1,5 +1,5 @@
 import { GameEngine } from './engine';
-import { orchestrator } from './orchestrator';
+import { orchestrator, RoutingResult } from './orchestrator';
 import { Agent } from './types';
 
 class AIAgentDashboard {
@@ -23,9 +23,11 @@ class AIAgentDashboard {
     this.setupUI();
     this.updateClock();
     this.updateAgentList();
+    this.updateLayaStatus();
     
     setInterval(() => this.updateClock(), 1000);
     setInterval(() => this.updateAgentList(), 500);
+    setInterval(() => this.updateLayaStatus(), 5000);
   }
   
   private setupUI(): void {
@@ -48,29 +50,27 @@ class AIAgentDashboard {
     });
   }
   
-  private submitTask(description: string): void {
+  private async submitTask(description: string): Promise<void> {
     const task = orchestrator.createTask(description);
-    const rankings = orchestrator.analyzeTask(description);
     
-    // Show analysis
+    // Try Laya first, then fall back to keywords
+    const rankings = await orchestrator.analyzeTaskWithLaya(description);
     const bestMatch = rankings[0];
     const agent = this.engine.getAgent(bestMatch.agentId);
     
     if (agent && agent.status !== 'working') {
       this.engine.assignTaskToAgent(task, bestMatch.agentId);
-      this.showNotification(
-        `Task assigned to ${agent.name}! (${Math.round(bestMatch.confidence * 100)}% match)\n${bestMatch.reasoning}`
-      );
+      this.showRoutingNotification(agent, bestMatch);
     } else if (agent) {
       // Find next available agent
-      const availableAgent = rankings.find(r => {
+      const availableRanking = rankings.find(r => {
         const a = this.engine.getAgent(r.agentId);
         return a && a.status !== 'working';
       });
       
-      if (availableAgent) {
-        const nextAgent = this.engine.getAgent(availableAgent.agentId)!;
-        this.engine.assignTaskToAgent(task, availableAgent.agentId);
+      if (availableRanking) {
+        const nextAgent = this.engine.getAgent(availableRanking.agentId)!;
+        this.engine.assignTaskToAgent(task, availableRanking.agentId);
         this.showNotification(
           `${agent.name} is busy. Task assigned to ${nextAgent.name}!`
         );
@@ -80,6 +80,18 @@ class AIAgentDashboard {
     }
     
     this.updateTaskQueue();
+  }
+  
+  private showRoutingNotification(agent: Agent, result: RoutingResult): void {
+    const confidencePercent = Math.round(result.confidence * 100);
+    const layaTag = result.usedLaya ? '🧠 LAYA' : '🔑 Keywords';
+    const latencyInfo = result.latencyMs ? ` (${result.latencyMs}ms)` : '';
+    
+    let message = `${layaTag}${latencyInfo}\n`;
+    message += `Assigned to ${agent.name} (${confidencePercent}% match)\n`;
+    message += result.reasoning;
+    
+    this.showNotification(message);
   }
   
   private updateClock(): void {
@@ -99,6 +111,30 @@ class AIAgentDashboard {
       const agents = this.engine.getAgents();
       const online = agents.filter(a => a.status !== 'offline').length;
       countEl.textContent = `${online} agents online`;
+    }
+  }
+  
+  private updateLayaStatus(): void {
+    const statusBar = document.querySelector('.status-bar');
+    if (!statusBar) return;
+    
+    const layaAvailable = orchestrator.isLayaAvailable();
+    
+    // Check if Laya indicator already exists
+    let layaIndicator = document.getElementById('laya-status');
+    if (!layaIndicator) {
+      layaIndicator = document.createElement('span');
+      layaIndicator.id = 'laya-status';
+      layaIndicator.style.marginLeft = '10px';
+      statusBar.appendChild(layaIndicator);
+    }
+    
+    if (layaAvailable) {
+      layaIndicator.innerHTML = '| <span style="color: #0f0;">🧠 LAYA</span>';
+      layaIndicator.title = 'Laya is connected - using AI-powered routing';
+    } else {
+      layaIndicator.innerHTML = '| <span style="color: #888;">🔑 Keywords</span>';
+      layaIndicator.title = 'Laya unavailable - using keyword-based routing';
     }
   }
   
@@ -175,6 +211,7 @@ class AIAgentDashboard {
     
     const notification = document.createElement('div');
     notification.className = 'notification';
+    notification.style.whiteSpace = 'pre-line';
     notification.textContent = message;
     document.body.appendChild(notification);
     
