@@ -1,0 +1,281 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>AI Agent Dashboard</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap" rel="stylesheet">
+    <style>
+      * {
+        margin: 0;
+        padding: 0;
+        box-sizing: border-box;
+      }
+      
+      body {
+        background: #1a1a2e;
+        font-family: 'Press Start 2P', cursive;
+        color: #eee;
+        overflow: hidden;
+        height: 100vh;
+      }
+      
+      #app {
+        display: flex;
+        flex-direction: column;
+        height: 100vh;
+      }
+      
+      header {
+        background: linear-gradient(180deg, #16213e 0%, #0f3460 100%);
+        padding: 12px 20px;
+        border-bottom: 4px solid #e94560;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+      }
+      
+      header h1 {
+        font-size: 14px;
+        color: #e94560;
+        text-shadow: 2px 2px 0 #000;
+      }
+      
+      .status-bar {
+        font-size: 8px;
+        color: #0f0;
+      }
+      
+      .main-content {
+        display: flex;
+        flex: 1;
+        overflow: hidden;
+      }
+      
+      .game-area {
+        flex: 1;
+        position: relative;
+        background: #0f0f23;
+        border-right: 4px solid #e94560;
+      }
+      
+      #game-canvas {
+        width: 100%;
+        height: 100%;
+        image-rendering: pixelated;
+        image-rendering: crisp-edges;
+      }
+      
+      .sidebar {
+        width: 320px;
+        background: #16213e;
+        display: flex;
+        flex-direction: column;
+        overflow: hidden;
+      }
+      
+      .panel {
+        padding: 16px;
+        border-bottom: 2px solid #e94560;
+      }
+      
+      .panel h2 {
+        font-size: 10px;
+        color: #e94560;
+        margin-bottom: 12px;
+        text-shadow: 1px 1px 0 #000;
+      }
+      
+      .task-input {
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+      }
+      
+      .task-input textarea {
+        background: #0f0f23;
+        border: 2px solid #e94560;
+        color: #fff;
+        font-family: 'Press Start 2P', cursive;
+        font-size: 8px;
+        padding: 10px;
+        resize: none;
+        height: 80px;
+      }
+      
+      .task-input textarea:focus {
+        outline: none;
+        border-color: #0f0;
+        box-shadow: 0 0 10px #0f0;
+      }
+      
+      .task-input button {
+        background: linear-gradient(180deg, #e94560 0%, #c23050 100%);
+        border: none;
+        color: #fff;
+        font-family: 'Press Start 2P', cursive;
+        font-size: 8px;
+        padding: 12px;
+        cursor: pointer;
+        text-shadow: 1px 1px 0 #000;
+        transition: all 0.1s;
+      }
+      
+      .task-input button:hover {
+        background: linear-gradient(180deg, #ff5670 0%, #e94560 100%);
+        transform: scale(1.02);
+      }
+      
+      .task-input button:active {
+        transform: scale(0.98);
+      }
+      
+      .agent-list {
+        flex: 1;
+        overflow-y: auto;
+        padding: 16px;
+      }
+      
+      .agent-card {
+        background: #0f0f23;
+        border: 2px solid #333;
+        padding: 10px;
+        margin-bottom: 8px;
+        cursor: pointer;
+        transition: all 0.2s;
+      }
+      
+      .agent-card:hover {
+        border-color: #e94560;
+        transform: translateX(4px);
+      }
+      
+      .agent-card.selected {
+        border-color: #0f0;
+        box-shadow: 0 0 10px rgba(0, 255, 0, 0.3);
+      }
+      
+      .agent-card.working {
+        border-color: #ff0;
+        animation: pulse 1s infinite;
+      }
+      
+      @keyframes pulse {
+        0%, 100% { box-shadow: 0 0 5px rgba(255, 255, 0, 0.3); }
+        50% { box-shadow: 0 0 15px rgba(255, 255, 0, 0.6); }
+      }
+      
+      .agent-header {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        margin-bottom: 6px;
+      }
+      
+      .agent-avatar {
+        width: 24px;
+        height: 24px;
+        image-rendering: pixelated;
+      }
+      
+      .agent-name {
+        font-size: 8px;
+        color: #fff;
+      }
+      
+      .agent-status {
+        font-size: 6px;
+        color: #888;
+      }
+      
+      .agent-status.idle { color: #0f0; }
+      .agent-status.working { color: #ff0; }
+      .agent-status.offline { color: #f00; }
+      
+      .task-queue {
+        max-height: 200px;
+        overflow-y: auto;
+        padding: 16px;
+        border-top: 2px solid #e94560;
+      }
+      
+      .task-item {
+        background: #0f0f23;
+        border-left: 3px solid #e94560;
+        padding: 8px;
+        margin-bottom: 6px;
+        font-size: 6px;
+      }
+      
+      .task-item.completed {
+        border-color: #0f0;
+        opacity: 0.6;
+      }
+      
+      .task-item.processing {
+        border-color: #ff0;
+      }
+      
+      .notification {
+        position: fixed;
+        bottom: 20px;
+        right: 20px;
+        background: #16213e;
+        border: 2px solid #e94560;
+        padding: 12px 16px;
+        font-size: 8px;
+        animation: slideIn 0.3s ease;
+        z-index: 1000;
+      }
+      
+      @keyframes slideIn {
+        from { transform: translateX(100%); opacity: 0; }
+        to { transform: translateX(0); opacity: 1; }
+      }
+      
+      .tooltip {
+        position: absolute;
+        background: #16213e;
+        border: 2px solid #e94560;
+        padding: 8px;
+        font-size: 6px;
+        pointer-events: none;
+        z-index: 100;
+        max-width: 150px;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="app">
+      <header>
+        <h1>🤖 AI AGENT HQ</h1>
+        <div class="status-bar">
+          <span id="time"></span> | <span id="agent-count">0 agents online</span>
+        </div>
+      </header>
+      <div class="main-content">
+        <div class="game-area">
+          <canvas id="game-canvas"></canvas>
+        </div>
+        <div class="sidebar">
+          <div class="panel">
+            <h2>📝 NEW TASK</h2>
+            <div class="task-input">
+              <textarea id="task-input" placeholder="Describe your task..."></textarea>
+              <button id="submit-task">ROUTE TO BEST AGENT</button>
+            </div>
+          </div>
+          <div class="agent-list" id="agent-list">
+            <h2 style="font-size: 10px; color: #e94560; margin-bottom: 12px;">🤖 AGENTS</h2>
+          </div>
+          <div class="task-queue" id="task-queue">
+            <h2 style="font-size: 10px; color: #e94560; margin-bottom: 12px;">📋 TASK QUEUE</h2>
+          </div>
+        </div>
+      </div>
+    </div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

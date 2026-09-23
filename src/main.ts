@@ -1,0 +1,192 @@
+import { GameEngine } from './engine';
+import { orchestrator } from './orchestrator';
+import { Agent } from './types';
+
+class AIAgentDashboard {
+  private engine: GameEngine;
+  private selectedAgent: Agent | null = null;
+  
+  constructor() {
+    const canvas = document.getElementById('game-canvas') as HTMLCanvasElement;
+    this.engine = new GameEngine(canvas);
+    
+    this.engine.setOnAgentSelect((agent) => {
+      this.selectedAgent = agent;
+      this.updateAgentList();
+    });
+    
+    this.engine.setOnTaskComplete((task) => {
+      this.showNotification(`Task completed by ${task.assignedAgent}!`);
+      this.updateTaskQueue();
+    });
+    
+    this.setupUI();
+    this.updateClock();
+    this.updateAgentList();
+    
+    setInterval(() => this.updateClock(), 1000);
+    setInterval(() => this.updateAgentList(), 500);
+  }
+  
+  private setupUI(): void {
+    const submitBtn = document.getElementById('submit-task') as HTMLButtonElement;
+    const taskInput = document.getElementById('task-input') as HTMLTextAreaElement;
+    
+    submitBtn.addEventListener('click', () => {
+      const description = taskInput.value.trim();
+      if (!description) return;
+      
+      this.submitTask(description);
+      taskInput.value = '';
+    });
+    
+    taskInput.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' && !e.shiftKey) {
+        e.preventDefault();
+        submitBtn.click();
+      }
+    });
+  }
+  
+  private submitTask(description: string): void {
+    const task = orchestrator.createTask(description);
+    const rankings = orchestrator.analyzeTask(description);
+    
+    // Show analysis
+    const bestMatch = rankings[0];
+    const agent = this.engine.getAgent(bestMatch.agentId);
+    
+    if (agent && agent.status !== 'working') {
+      this.engine.assignTaskToAgent(task, bestMatch.agentId);
+      this.showNotification(
+        `Task assigned to ${agent.name}! (${Math.round(bestMatch.confidence * 100)}% match)\n${bestMatch.reasoning}`
+      );
+    } else if (agent) {
+      // Find next available agent
+      const availableAgent = rankings.find(r => {
+        const a = this.engine.getAgent(r.agentId);
+        return a && a.status !== 'working';
+      });
+      
+      if (availableAgent) {
+        const nextAgent = this.engine.getAgent(availableAgent.agentId)!;
+        this.engine.assignTaskToAgent(task, availableAgent.agentId);
+        this.showNotification(
+          `${agent.name} is busy. Task assigned to ${nextAgent.name}!`
+        );
+      } else {
+        this.showNotification('All agents are busy! Task queued...');
+      }
+    }
+    
+    this.updateTaskQueue();
+  }
+  
+  private updateClock(): void {
+    const timeEl = document.getElementById('time');
+    const countEl = document.getElementById('agent-count');
+    
+    if (timeEl) {
+      const now = new Date();
+      timeEl.textContent = now.toLocaleTimeString('en-US', { 
+        hour: '2-digit', 
+        minute: '2-digit',
+        second: '2-digit'
+      });
+    }
+    
+    if (countEl) {
+      const agents = this.engine.getAgents();
+      const online = agents.filter(a => a.status !== 'offline').length;
+      countEl.textContent = `${online} agents online`;
+    }
+  }
+  
+  private updateAgentList(): void {
+    const container = document.getElementById('agent-list');
+    if (!container) return;
+    
+    const agents = this.engine.getAgents();
+    
+    container.innerHTML = '<h2 style="font-size: 10px; color: #e94560; margin-bottom: 12px;">🤖 AGENTS</h2>';
+    
+    agents.forEach(agent => {
+      const card = document.createElement('div');
+      card.className = `agent-card ${agent.status === 'working' ? 'working' : ''} ${this.selectedAgent?.id === agent.id ? 'selected' : ''}`;
+      
+      card.innerHTML = `
+        <div class="agent-header">
+          <div class="agent-avatar" style="background: ${agent.color}; border-radius: 4px;"></div>
+          <div>
+            <div class="agent-name">${agent.name}</div>
+            <div class="agent-status ${agent.status}">${agent.status.toUpperCase()}</div>
+          </div>
+        </div>
+        ${agent.currentTask ? `<div style="font-size: 6px; color: #888; margin-top: 4px;">Working on: ${agent.currentTask.description.substring(0, 30)}...</div>` : ''}
+      `;
+      
+      card.addEventListener('click', () => {
+        this.selectedAgent = agent;
+        this.engine.selectAgent(agent.id);
+        this.updateAgentList();
+      });
+      
+      container.appendChild(card);
+    });
+  }
+  
+  private updateTaskQueue(): void {
+    const container = document.getElementById('task-queue');
+    if (!container) return;
+    
+    const tasks = orchestrator.getRecentTasks(5);
+    
+    container.innerHTML = '<h2 style="font-size: 10px; color: #e94560; margin-bottom: 12px;">📋 TASK QUEUE</h2>';
+    
+    if (tasks.length === 0) {
+      container.innerHTML += '<div style="font-size: 8px; color: #666;">No tasks yet...</div>';
+      return;
+    }
+    
+    tasks.reverse().forEach(task => {
+      const item = document.createElement('div');
+      item.className = `task-item ${task.status}`;
+      
+      const statusIcon = task.status === 'completed' ? '✓' : task.status === 'processing' ? '⟳' : '○';
+      const agentName = task.assignedAgent ? 
+        this.engine.getAgent(task.assignedAgent)?.name || task.assignedAgent : 
+        'Unassigned';
+      
+      item.innerHTML = `
+        <div style="display: flex; justify-content: space-between; align-items: center;">
+          <span>${statusIcon} ${task.description.substring(0, 25)}${task.description.length > 25 ? '...' : ''}</span>
+        </div>
+        <div style="color: #666; margin-top: 2px;">→ ${agentName}</div>
+      `;
+      
+      container.appendChild(item);
+    });
+  }
+  
+  private showNotification(message: string): void {
+    // Remove any existing notification
+    const existing = document.querySelector('.notification');
+    if (existing) existing.remove();
+    
+    const notification = document.createElement('div');
+    notification.className = 'notification';
+    notification.textContent = message;
+    document.body.appendChild(notification);
+    
+    setTimeout(() => {
+      notification.style.opacity = '0';
+      notification.style.transition = 'opacity 0.3s';
+      setTimeout(() => notification.remove(), 300);
+    }, 4000);
+  }
+}
+
+// Initialize the dashboard
+document.addEventListener('DOMContentLoaded', () => {
+  new AIAgentDashboard();
+});
