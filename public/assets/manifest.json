@@ -1,0 +1,89 @@
+{
+  "version": "1.0",
+  "style": "pokemon-gba",
+  "tileSize": 32,
+  "spriteSize": 32,
+  
+  "agents": {
+    "jarvis": {
+      "name": "J.A.R.V.I.S.",
+      "sprite": "sprites/jarvis/walk.png",
+      "idle": "sprites/jarvis/idle.png",
+      "portrait": "sprites/jarvis/portrait.png"
+    },
+    "friday": {
+      "name": "F.R.I.D.A.Y.",
+      "sprite": "sprites/friday/walk.png",
+      "idle": "sprites/friday/idle.png",
+      "portrait": "sprites/friday/portrait.png"
+    },
+    "bumblebee": {
+      "name": "Bumblebee",
+      "sprite": "sprites/bumblebee/walk.png",
+      "idle": "sprites/bumblebee/idle.png",
+      "portrait": "sprites/bumblebee/portrait.png"
+    },
+    "cursor": {
+      "name": "Cursor",
+      "sprite": "sprites/cursor/walk.png",
+      "idle": "sprites/cursor/idle.png",
+      "portrait": "sprites/cursor/portrait.png"
+    },
+    "claude": {
+      "name": "Claude",
+      "sprite": "sprites/claude/walk.png",
+      "idle": "sprites/claude/idle.png",
+      "portrait": "sprites/claude/portrait.png"
+    },
+    "claude-code": {
+      "name": "Claude Code",
+      "sprite": "sprites/claude-code/walk.png",
+      "idle": "sprites/claude-code/idle.png",
+      "portrait": "sprites/claude-code/portrait.png"
+    },
+    "claude-cowork": {
+      "name": "Claude Cowork",
+      "sprite": "sprites/claude-cowork/walk.png",
+      "idle": "sprites/claude-cowork/idle.png",
+      "portrait": "sprites/claude-cowork/portrait.png"
+    },
+    "grokbot": {
+      "name": "Grok",
+      "sprite": "sprites/grok/walk.png",
+      "idle": "sprites/grok/idle.png",
+      "portrait": "sprites/grok/portrait.png"
+    },
+    "gemini": {
+      "name": "Gemini",
+      "sprite": "sprites/gemini/walk.png",
+      "idle": "sprites/gemini/idle.png",
+      "portrait": "sprites/gemini/portrait.png"
+    },
+    "apple-intelligence": {
+      "name": "Apple Intelligence",
+      "sprite": "sprites/apple/walk.png",
+      "idle": "sprites/apple/idle.png",
+      "portrait": "sprites/apple/portrait.png"
+    }
+  },
+  
+  "tileset": {
+    "floor": "tiles/floor.png",
+    "walls": "tiles/walls.png",
+    "furniture": "tiles/furniture.png",
+    "decorations": "tiles/decorations.png"
+  },
+  
+  "ui": {
+    "textbox": "ui/textbox.png",
+    "menu": "ui/menu.png",
+    "icons": "ui/icons.png",
+    "taskPanel": "ui/task-panel.png"
+  },
+  
+  "map": {
+    "width": 20,
+    "height": 15,
+    "file": "maps/hq.json"
+  }
+}
