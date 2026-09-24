@@ -2,16 +2,60 @@ import { Agent } from './types';
 import { AGENT_SPRITES } from './sprites';
 
 export const AGENT_CONFIGS: Omit<Agent, 'x' | 'y' | 'targetX' | 'targetY' | 'frame' | 'frameTimer' | 'currentTask'>[] = [
+  // === CURSOR PROJECT COORDINATORS ===
+  {
+    id: 'jarvis',
+    name: 'J.A.R.V.I.S.',
+    description: 'Just A Rather Very Intelligent System. Coordinator for Cursor local agents. Manages on-device coding tasks and local development workflows.',
+    color: '#ffd700',
+    secondaryColor: '#b8860b',
+    status: 'idle',
+    direction: 'right',
+    specialties: ['local', 'coordinator', 'cursor', 'development', 'on-device', 'planning', 'delegation'],
+    sprite: AGENT_SPRITES.stand,
+    role: 'coordinator',
+    subAgents: ['cursor'],
+  },
+  {
+    id: 'friday',
+    name: 'F.R.I.D.A.Y.',
+    description: 'Female Replacement Intelligent Digital Assistant Youth. Cloud troubleshooting coordinator. Manages cloud agents for debugging, CI/CD, and infrastructure issues.',
+    color: '#00bfff',
+    secondaryColor: '#1e90ff',
+    status: 'idle',
+    direction: 'left',
+    specialties: ['cloud', 'coordinator', 'troubleshooting', 'ci-cd', 'infrastructure', 'debugging', 'monitoring'],
+    sprite: AGENT_SPRITES.stand,
+    role: 'coordinator',
+    subAgents: ['bumblebee'],
+  },
+  {
+    id: 'bumblebee',
+    name: 'Bumblebee',
+    description: 'F.R.I.D.A.Y.\'s loyal subagent. Handles cloud task execution, log analysis, and automated fixes. Small but mighty.',
+    color: '#ffd700',
+    secondaryColor: '#222222',
+    status: 'idle',
+    direction: 'down',
+    specialties: ['cloud-worker', 'logs', 'automated-fixes', 'execution', 'ci', 'testing'],
+    sprite: AGENT_SPRITES.stand,
+    role: 'subagent',
+    parentAgent: 'friday',
+  },
+  
+  // === STANDALONE AGENTS ===
   {
     id: 'cursor',
     name: 'Cursor',
-    description: 'AI-powered code editor agent. Great for coding tasks, refactoring, and IDE integrations.',
+    description: 'AI-powered code editor agent. Great for coding tasks, refactoring, and IDE integrations. Reports to J.A.R.V.I.S.',
     color: '#00d4ff',
     secondaryColor: '#0066ff',
     status: 'idle',
     direction: 'right',
     specialties: ['coding', 'refactoring', 'ide', 'code-completion', 'debugging', 'file-editing'],
     sprite: AGENT_SPRITES.stand,
+    role: 'subagent',
+    parentAgent: 'jarvis',
   },
   {
     id: 'grokbot',
@@ -23,6 +67,7 @@ export const AGENT_CONFIGS: Omit<Agent, 'x' | 'y' | 'targetX' | 'targetY' | 'fra
     direction: 'left',
     specialties: ['real-time', 'social-media', 'current-events', 'humor', 'twitter', 'trends'],
     sprite: AGENT_SPRITES.stand,
+    role: 'agent',
   },
   {
     id: 'claude',
@@ -34,6 +79,7 @@ export const AGENT_CONFIGS: Omit<Agent, 'x' | 'y' | 'targetX' | 'targetY' | 'fra
     direction: 'right',
     specialties: ['analysis', 'writing', 'research', 'conversation', 'reasoning', 'ethics'],
     sprite: AGENT_SPRITES.stand,
+    role: 'agent',
   },
   {
     id: 'claude-cowork',
@@ -45,6 +91,7 @@ export const AGENT_CONFIGS: Omit<Agent, 'x' | 'y' | 'targetX' | 'targetY' | 'fra
     direction: 'down',
     specialties: ['collaboration', 'coordination', 'workflow', 'handoff', 'team', 'delegation'],
     sprite: AGENT_SPRITES.stand,
+    role: 'agent',
   },
   {
     id: 'claude-code',
@@ -56,6 +103,7 @@ export const AGENT_CONFIGS: Omit<Agent, 'x' | 'y' | 'targetX' | 'targetY' | 'fra
     direction: 'up',
     specialties: ['software', 'architecture', 'code-review', 'debugging', 'terminal', 'git'],
     sprite: AGENT_SPRITES.stand,
+    role: 'agent',
   },
   {
     id: 'gemini',
@@ -67,6 +115,7 @@ export const AGENT_CONFIGS: Omit<Agent, 'x' | 'y' | 'targetX' | 'targetY' | 'fra
     direction: 'right',
     specialties: ['multimodal', 'images', 'search', 'data-analysis', 'google', 'vision'],
     sprite: AGENT_SPRITES.stand,
+    role: 'agent',
   },
   {
     id: 'apple-intelligence',
@@ -78,6 +127,7 @@ export const AGENT_CONFIGS: Omit<Agent, 'x' | 'y' | 'targetX' | 'targetY' | 'fra
     direction: 'left',
     specialties: ['privacy', 'on-device', 'siri', 'apple', 'ios', 'macos', 'local'],
     sprite: AGENT_SPRITES.stand,
+    role: 'agent',
   },
 ];
 
@@ -102,4 +152,14 @@ export function createAgents(canvasWidth: number, canvasHeight: number): Agent[]
   });
   
   return agents;
+}
+
+export function getCoordinator(agents: Agent[], agentId: string): Agent | undefined {
+  const agent = agents.find(a => a.id === agentId);
+  if (!agent?.parentAgent) return undefined;
+  return agents.find(a => a.id === agent.parentAgent);
+}
+
+export function getSubAgents(agents: Agent[], coordinatorId: string): Agent[] {
+  return agents.filter(a => a.parentAgent === coordinatorId);
 }

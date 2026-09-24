@@ -169,6 +169,9 @@ export class GameEngine {
   private render(): void {
     this.renderer.clear();
     
+    // Draw connections between coordinators and subagents
+    this.renderer.drawAgentConnections(this.state.agents);
+    
     // Sort agents by Y position for proper layering
     const sortedAgents = [...this.state.agents].sort((a, b) => a.y - b.y);
     
@@ -185,7 +188,7 @@ export class GameEngine {
     if (this.state.hoveredAgent) {
       const agent = this.state.agents.find(a => a.id === this.state.hoveredAgent);
       if (agent) {
-        this.renderer.drawTooltip(agent, this.mouseX, this.mouseY);
+        this.renderer.drawTooltip(agent, this.mouseX, this.mouseY, this.state.agents);
       }
     }
   }

@@ -68,6 +68,33 @@ export const AGENT_SPRITES = {
 
 // Unique icon overlays for each agent (drawn on top of head)
 export const AGENT_ICONS: Record<string, number[][]> = {
+  // J.A.R.V.I.S. - Arc reactor / hexagon
+  jarvis: [
+    [0,0,1,1,0,0],
+    [0,1,1,1,1,0],
+    [1,1,0,0,1,1],
+    [1,1,0,0,1,1],
+    [0,1,1,1,1,0],
+    [0,0,1,1,0,0],
+  ],
+  // F.R.I.D.A.Y. - Cloud with lightning
+  friday: [
+    [0,1,1,1,1,0],
+    [1,1,1,1,1,1],
+    [1,1,1,1,1,1],
+    [0,0,1,1,0,0],
+    [0,1,1,0,0,0],
+    [0,0,1,0,0,0],
+  ],
+  // Bumblebee - Autobot-style face
+  bumblebee: [
+    [0,1,0,0,1,0],
+    [1,1,1,1,1,1],
+    [1,0,1,1,0,1],
+    [1,1,1,1,1,1],
+    [0,1,0,0,1,0],
+    [0,0,1,1,0,0],
+  ],
   cursor: [
     [0,0,1,1,0,0],
     [0,1,1,1,1,0],

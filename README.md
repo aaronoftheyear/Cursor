@@ -6,17 +6,34 @@ A retro pixel-art dashboard where AI agents walk around like characters in an ol
 
 ## Features
 
-- **Pixel Art Agents**: Watch Cursor, Grok, Claude, Claude Cowork, Claude Code, Gemini, and Apple Intelligence walk around your virtual HQ
-- **JEV-Style Orchestration**: Automatically routes tasks to the most suitable agent based on keywords and specialties
+- **Pixel Art Agents**: Watch AI agents walk around your virtual HQ
+- **Cursor Projects Integration**: J.A.R.V.I.S. and F.R.I.D.A.Y. coordinators with subagents
+- **Laya Orchestration**: Self-hosted JEV alternative for intelligent task routing
 - **Real-time Status**: See which agents are idle, working, or offline
 - **Task Queue**: Track pending and completed tasks
+- **Agent Hierarchy**: Coordinators manage subagents with visual connection lines
 - **Native Mac App**: Runs as a native Electron app on your Mac Studio
 
 ## Agents
 
+### Coordinators (Cursor Projects)
+
+| Agent | Role | Manages |
+|-------|------|---------|
+| **J.A.R.V.I.S.** | Local Coordinator | Cursor local agents, on-device development |
+| **F.R.I.D.A.Y.** | Cloud Coordinator | Cloud troubleshooting, CI/CD, infrastructure |
+
+### Subagents
+
+| Agent | Reports To | Specialties |
+|-------|------------|-------------|
+| **Cursor** | J.A.R.V.I.S. | IDE integration, code editing, refactoring |
+| **Bumblebee** | F.R.I.D.A.Y. | Log analysis, automated fixes, CI tasks |
+
+### Standalone Agents
+
 | Agent | Specialties |
 |-------|-------------|
-| **Cursor** | IDE integration, code editing, refactoring, autocomplete |
 | **Grok** | Real-time info, social media, current events, humor |
 | **Claude** | Analysis, writing, research, reasoning, ethics |
 | **Claude Cowork** | Team collaboration, multi-agent coordination, handoffs |

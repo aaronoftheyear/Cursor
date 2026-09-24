@@ -10,7 +10,27 @@ interface RoutingRule {
 }
 
 const ROUTING_RULES: RoutingRule[] = [
-  // Cursor - IDE and code editing
+  // === CURSOR PROJECT COORDINATORS ===
+  
+  // J.A.R.V.I.S. - Local Cursor coordinator
+  { keywords: ['jarvis', 'local', 'on-device', 'laptop', 'desktop'], agentId: 'jarvis', weight: 15 },
+  { keywords: ['coordinate', 'plan', 'project', 'feature', 'migration'], agentId: 'jarvis', weight: 12 },
+  { keywords: ['cursor local', 'local agent', 'local development'], agentId: 'jarvis', weight: 18 },
+  
+  // F.R.I.D.A.Y. - Cloud troubleshooting coordinator
+  { keywords: ['friday', 'cloud', 'troubleshoot', 'infrastructure'], agentId: 'friday', weight: 15 },
+  { keywords: ['ci', 'cd', 'pipeline', 'deploy', 'production'], agentId: 'friday', weight: 12 },
+  { keywords: ['monitor', 'alert', 'incident', 'outage', 'downtime'], agentId: 'friday', weight: 14 },
+  { keywords: ['cloud agent', 'cloud troubleshooting'], agentId: 'friday', weight: 18 },
+  
+  // Bumblebee - F.R.I.D.A.Y.'s subagent
+  { keywords: ['bumblebee', 'worker', 'execute', 'run'], agentId: 'bumblebee', weight: 12 },
+  { keywords: ['logs', 'log analysis', 'stack trace', 'error log'], agentId: 'bumblebee', weight: 14 },
+  { keywords: ['automated fix', 'auto-fix', 'quick fix'], agentId: 'bumblebee', weight: 12 },
+  
+  // === STANDALONE AGENTS ===
+  
+  // Cursor - IDE and code editing (reports to J.A.R.V.I.S.)
   { keywords: ['edit', 'refactor', 'ide', 'autocomplete', 'snippet', 'format'], agentId: 'cursor', weight: 10 },
   { keywords: ['vscode', 'editor', 'cursor'], agentId: 'cursor', weight: 15 },
   
@@ -49,6 +69,11 @@ const ROUTING_RULES: RoutingRule[] = [
 
 // Agent descriptions for Laya
 const AGENT_DESCRIPTIONS: Record<string, string> = {
+  // Cursor Project Coordinators
+  'jarvis': 'J.A.R.V.I.S. - Coordinator for Cursor local agents. Manages on-device coding, local development, and project planning.',
+  'friday': 'F.R.I.D.A.Y. - Cloud troubleshooting coordinator. Manages cloud agents for CI/CD, infrastructure, monitoring, and incident response.',
+  'bumblebee': 'Bumblebee - Cloud worker subagent. Handles log analysis, automated fixes, test execution, and CI tasks.',
+  // Standalone agents
   'cursor': 'AI-powered code editor. Best for coding tasks, refactoring, IDE integrations, and code completion.',
   'grokbot': 'X/Twitter AI with real-time knowledge. Best for current events, social trends, and witty responses.',
   'claude': 'General AI assistant. Excellent for analysis, writing, research, and thoughtful conversations.',

@@ -282,6 +282,25 @@ export class Renderer {
     this.ctx.font = '8px "Press Start 2P"';
     this.ctx.textAlign = 'center';
     
+    // Role badge for coordinators
+    if (agent.role === 'coordinator') {
+      const badgeY = tagY - 12;
+      this.ctx.fillStyle = '#ffd700';
+      this.ctx.fillRect(tagX - 12, badgeY - 6, 24, 10);
+      this.ctx.fillStyle = '#000';
+      this.ctx.font = '5px "Press Start 2P"';
+      this.ctx.fillText('COORD', tagX, badgeY);
+      this.ctx.font = '8px "Press Start 2P"';
+    } else if (agent.role === 'subagent') {
+      const badgeY = tagY - 12;
+      this.ctx.fillStyle = '#888';
+      this.ctx.fillRect(tagX - 10, badgeY - 6, 20, 10);
+      this.ctx.fillStyle = '#fff';
+      this.ctx.font = '5px "Press Start 2P"';
+      this.ctx.fillText('SUB', tagX, badgeY);
+      this.ctx.font = '8px "Press Start 2P"';
+    }
+    
     // Background
     const textWidth = this.ctx.measureText(agent.name).width;
     this.ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
@@ -292,15 +311,52 @@ export class Renderer {
     this.ctx.fillText(agent.name, tagX, tagY);
   }
   
-  drawTooltip(agent: Agent, mouseX: number, mouseY: number): void {
+  drawAgentConnections(agents: Agent[]): void {
+    this.ctx.save();
+    this.ctx.setLineDash([4, 4]);
+    this.ctx.lineWidth = 1;
+    
+    for (const agent of agents) {
+      if (agent.parentAgent) {
+        const parent = agents.find(a => a.id === agent.parentAgent);
+        if (parent) {
+          const startX = agent.x + (SPRITE_SIZE * SCALE) / 2;
+          const startY = agent.y + (SPRITE_SIZE * SCALE) / 2;
+          const endX = parent.x + (SPRITE_SIZE * SCALE) / 2;
+          const endY = parent.y + (SPRITE_SIZE * SCALE) / 2;
+          
+          // Draw connection line
+          this.ctx.strokeStyle = parent.color;
+          this.ctx.globalAlpha = 0.4;
+          this.ctx.beginPath();
+          this.ctx.moveTo(startX, startY);
+          this.ctx.lineTo(endX, endY);
+          this.ctx.stroke();
+        }
+      }
+    }
+    
+    this.ctx.restore();
+  }
+  
+  drawTooltip(agent: Agent, mouseX: number, mouseY: number, allAgents: Agent[]): void {
     const padding = 10;
     const lineHeight = 14;
-    const maxWidth = 200;
+    const maxWidth = 220;
     
     this.ctx.font = '8px "Press Start 2P"';
     
     const lines = this.wrapText(agent.description, maxWidth - padding * 2);
-    const tooltipHeight = lines.length * lineHeight + padding * 2 + 20;
+    
+    // Calculate extra height for role info
+    let extraLines = 0;
+    if (agent.role === 'coordinator' && agent.subAgents?.length) {
+      extraLines = 1;
+    } else if (agent.role === 'subagent' && agent.parentAgent) {
+      extraLines = 1;
+    }
+    
+    const tooltipHeight = lines.length * lineHeight + padding * 2 + 34 + (extraLines * lineHeight);
     const tooltipWidth = maxWidth;
     
     let tooltipX = mouseX + 15;
@@ -321,19 +377,38 @@ export class Renderer {
     this.ctx.lineWidth = 2;
     this.ctx.strokeRect(tooltipX, tooltipY, tooltipWidth, tooltipHeight);
     
-    // Title
+    // Title with role
     this.ctx.fillStyle = agent.color;
-    this.ctx.fillText(agent.name, tooltipX + padding, tooltipY + padding + 8);
+    const roleLabel = agent.role === 'coordinator' ? ' [COORD]' : agent.role === 'subagent' ? ' [SUB]' : '';
+    this.ctx.fillText(agent.name + roleLabel, tooltipX + padding, tooltipY + padding + 8);
     
     // Status
     const statusColors = { idle: '#00ff00', working: '#ffff00', offline: '#ff0000' };
     this.ctx.fillStyle = statusColors[agent.status];
     this.ctx.fillText(`[${agent.status.toUpperCase()}]`, tooltipX + padding, tooltipY + padding + 20);
     
+    // Role info
+    let currentY = tooltipY + padding + 34;
+    if (agent.role === 'coordinator' && agent.subAgents?.length) {
+      const subNames = agent.subAgents
+        .map(id => allAgents.find(a => a.id === id)?.name || id)
+        .join(', ');
+      this.ctx.fillStyle = '#ffd700';
+      this.ctx.fillText(`Manages: ${subNames}`, tooltipX + padding, currentY);
+      currentY += lineHeight;
+    } else if (agent.role === 'subagent' && agent.parentAgent) {
+      const parent = allAgents.find(a => a.id === agent.parentAgent);
+      if (parent) {
+        this.ctx.fillStyle = '#888';
+        this.ctx.fillText(`Reports to: ${parent.name}`, tooltipX + padding, currentY);
+        currentY += lineHeight;
+      }
+    }
+    
     // Description
     this.ctx.fillStyle = '#aaaaaa';
     lines.forEach((line, i) => {
-      this.ctx.fillText(line, tooltipX + padding, tooltipY + padding + 36 + i * lineHeight);
+      this.ctx.fillText(line, tooltipX + padding, currentY + i * lineHeight);
     });
   }
   

@@ -144,31 +144,70 @@ class AIAgentDashboard {
     
     const agents = this.engine.getAgents();
     
-    container.innerHTML = '<h2 style="font-size: 10px; color: #e94560; margin-bottom: 12px;">🤖 AGENTS</h2>';
+    // Group agents: coordinators first, then standalone agents
+    const coordinators = agents.filter(a => a.role === 'coordinator');
+    const standaloneAgents = agents.filter(a => a.role === 'agent');
     
-    agents.forEach(agent => {
-      const card = document.createElement('div');
-      card.className = `agent-card ${agent.status === 'working' ? 'working' : ''} ${this.selectedAgent?.id === agent.id ? 'selected' : ''}`;
+    container.innerHTML = '';
+    
+    // Coordinators section
+    if (coordinators.length > 0) {
+      container.innerHTML += '<h2 style="font-size: 10px; color: #ffd700; margin-bottom: 12px;">👑 COORDINATORS</h2>';
       
-      card.innerHTML = `
-        <div class="agent-header">
-          <div class="agent-avatar" style="background: ${agent.color}; border-radius: 4px;"></div>
-          <div>
-            <div class="agent-name">${agent.name}</div>
-            <div class="agent-status ${agent.status}">${agent.status.toUpperCase()}</div>
-          </div>
-        </div>
-        ${agent.currentTask ? `<div style="font-size: 6px; color: #888; margin-top: 4px;">Working on: ${agent.currentTask.description.substring(0, 30)}...</div>` : ''}
-      `;
-      
-      card.addEventListener('click', () => {
-        this.selectedAgent = agent;
-        this.engine.selectAgent(agent.id);
-        this.updateAgentList();
+      coordinators.forEach(coordinator => {
+        container.appendChild(this.createAgentCard(coordinator, agents));
+        
+        // Show subagents indented under coordinator
+        const subagents = agents.filter(a => a.parentAgent === coordinator.id);
+        subagents.forEach(subagent => {
+          const subCard = this.createAgentCard(subagent, agents);
+          subCard.style.marginLeft = '16px';
+          subCard.style.borderLeft = `2px solid ${coordinator.color}`;
+          container.appendChild(subCard);
+        });
       });
-      
-      container.appendChild(card);
+    }
+    
+    // Standalone agents section
+    if (standaloneAgents.length > 0) {
+      container.innerHTML += '<h2 style="font-size: 10px; color: #e94560; margin-bottom: 12px; margin-top: 16px;">🤖 AGENTS</h2>';
+      standaloneAgents.forEach(agent => {
+        container.appendChild(this.createAgentCard(agent, agents));
+      });
+    }
+  }
+  
+  private createAgentCard(agent: Agent, allAgents: Agent[]): HTMLDivElement {
+    const card = document.createElement('div');
+    card.className = `agent-card ${agent.status === 'working' ? 'working' : ''} ${this.selectedAgent?.id === agent.id ? 'selected' : ''}`;
+    
+    // Role badge
+    let roleBadge = '';
+    if (agent.role === 'coordinator') {
+      roleBadge = '<span style="font-size: 5px; background: #ffd700; color: #000; padding: 1px 3px; margin-left: 4px;">COORD</span>';
+    } else if (agent.role === 'subagent') {
+      const parent = allAgents.find(a => a.id === agent.parentAgent);
+      roleBadge = `<span style="font-size: 5px; background: #555; color: #fff; padding: 1px 3px; margin-left: 4px;">→ ${parent?.name || 'SUB'}</span>`;
+    }
+    
+    card.innerHTML = `
+      <div class="agent-header">
+        <div class="agent-avatar" style="background: ${agent.color}; border-radius: 4px;"></div>
+        <div>
+          <div class="agent-name">${agent.name}${roleBadge}</div>
+          <div class="agent-status ${agent.status}">${agent.status.toUpperCase()}</div>
+        </div>
+      </div>
+      ${agent.currentTask ? `<div style="font-size: 6px; color: #888; margin-top: 4px;">Working on: ${agent.currentTask.description.substring(0, 30)}...</div>` : ''}
+    `;
+    
+    card.addEventListener('click', () => {
+      this.selectedAgent = agent;
+      this.engine.selectAgent(agent.id);
+      this.updateAgentList();
     });
+    
+    return card;
   }
   
   private updateTaskQueue(): void {

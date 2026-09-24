@@ -1,3 +1,5 @@
+export type AgentRole = 'agent' | 'coordinator' | 'subagent';
+
 export interface Agent {
   id: string;
   name: string;
@@ -15,6 +17,9 @@ export interface Agent {
   specialties: string[];
   currentTask: Task | null;
   sprite: number[][];
+  role: AgentRole;
+  parentAgent?: string; // For subagents, the coordinator they report to
+  subAgents?: string[]; // For coordinators, their subagent IDs
 }
 
 export interface Task {
