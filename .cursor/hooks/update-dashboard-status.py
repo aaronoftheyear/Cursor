@@ -104,36 +104,33 @@ def is_duplicate_event(event: str, hook: dict) -> bool:
 
 
 def heal_stale_agents(state: dict) -> bool:
-    """Reset agents to idle if they're stuck working with no recent events."""
+    """Reset agents to idle if they're stuck working with no recent events.
+    
+    Only uses time-based staleness (lastEventAt). We do NOT use agentSessions
+    because Cursor fires 'stop' at the end of every turn (not per session),
+    so sessions can be 0 while the agent is actively working on turn 2+.
+    """
     now = utc_now_ts()
     changed = False
     agents = state.get("agents", {})
-    sessions = state.get("agentSessions", {})
-    last_events = state.setdefault("lastEventAt", {})
+    last_events = state.get("lastEventAt", {})
     for agent_id in DEFAULT_AGENTS:
         agent = agents.get(agent_id)
         if not agent:
             continue
         if agent.get("status") not in ("working", "busy"):
             continue
-        if agent.get("source") == "cloud-api":
+        if agent.get("source") in ("cloud-api", "external"):
             continue
-        session_count = int(sessions.get(agent_id, 0))
         last_event_ts = last_events.get(agent_id)
-        is_stale = False
-        if session_count <= 0:
-            is_stale = True
-        elif last_event_ts:
-            try:
-                if now - float(last_event_ts) > STALE_TIMEOUT_SECONDS:
-                    is_stale = True
-            except (ValueError, TypeError):
-                pass
-        if is_stale:
-            agents[agent_id] = default_agent_status(agent_id)
-            if agent_id in sessions:
-                sessions[agent_id] = 0
-            changed = True
+        if not last_event_ts:
+            continue
+        try:
+            if now - float(last_event_ts) > STALE_TIMEOUT_SECONDS:
+                agents[agent_id] = default_agent_status(agent_id)
+                changed = True
+        except (ValueError, TypeError):
+            pass
     return changed
 
 
@@ -635,18 +632,17 @@ def main() -> int:
         return 0
 
     if event == "stop":
-        if agents:
-            bump_agent_sessions(state, agents, -1)
-            for agent_id in agents:
-                sessions = state.get("agentSessions") or {}
-                if int(sessions.get(agent_id, 0)) > 0:
-                    continue
-                set_agent(
-                    state,
-                    agent_id,
-                    "idle",
-                    default_agent_status(agent_id)["detail"],
-                )
+        # 'stop' fires at the end of every TURN, not per session.
+        # Don't decrement agentSessions here - only sessionEnd should do that.
+        # Set agent to idle (turn is done, waiting for next input).
+        for agent_id in agents:
+            touch_agent_event(state, agent_id)
+            set_agent(
+                state,
+                agent_id,
+                "idle",
+                default_agent_status(agent_id)["detail"],
+            )
         save_state(state)
         return 0
 

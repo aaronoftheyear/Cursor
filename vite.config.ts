@@ -81,9 +81,15 @@ function defaultAgentStatus(agentId: string): AgentStatus {
 }
 
 function healStaleAgents(live: LiveStatus): LiveStatus {
+  /**
+   * Reset agents to idle if they're stuck working with no recent events.
+   * 
+   * Only uses time-based staleness (lastEventAt). We do NOT use agentSessions
+   * because Cursor fires 'stop' at the end of every turn (not per session),
+   * so sessions can be 0 while the agent is actively working on turn 2+.
+   */
   const now = Date.now()
   const healed = { ...live, agents: { ...live.agents } }
-  const sessions = live.agentSessions || {}
   const lastEvents = live.lastEventAt || {}
 
   for (const agentId of DEFAULT_AGENTS) {
@@ -92,20 +98,15 @@ function healStaleAgents(live: LiveStatus): LiveStatus {
     if (agent.status !== 'working' && agent.status !== 'busy') continue
     if (agent.source === 'cloud-api' || agent.source === 'external') continue
 
-    const sessionCount = sessions[agentId] ?? 0
     const lastEventTs = lastEvents[agentId]
+    if (!lastEventTs) continue
 
-    let isStale = false
-    if (sessionCount <= 0) {
-      isStale = true
-    } else if (lastEventTs) {
-      const lastEventTime = typeof lastEventTs === 'number' ? lastEventTs * 1000 : lastEventTs
-      if (now - lastEventTime > CURSOR_STALE_MS) {
-        isStale = true
-      }
-    }
-
-    if (isStale) {
+    // lastEventTs is Unix seconds from Python, convert to ms
+    const lastEventTime = typeof lastEventTs === 'number' 
+      ? (lastEventTs < 1e12 ? lastEventTs * 1000 : lastEventTs) 
+      : 0
+    
+    if (lastEventTime > 0 && now - lastEventTime > CURSOR_STALE_MS) {
       healed.agents[agentId] = defaultAgentStatus(agentId)
     }
   }
