@@ -237,7 +237,11 @@ export class GameEngine {
   }
 
   private findNearestWalkableFootTile(agent: Agent, preferred: TileCoord): TileCoord | null {
-    const candidates = this.getWalkableTilesInRoom(agent);
+    // Try room tiles first, fall back to all walkable tiles if agent has no room
+    let candidates = this.getWalkableTilesInRoom(agent);
+    if (candidates.length === 0) {
+      candidates = this.getAllWalkableTiles(agent);
+    }
     if (candidates.length === 0) return null;
     let best = candidates[0];
     let bestDist = Number.POSITIVE_INFINITY;

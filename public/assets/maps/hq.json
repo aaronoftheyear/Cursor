@@ -44,6 +44,7 @@
       "color": "#1a1a2e",
       "agents": [
         "grokbot",
+        "metabee",
         "gemini",
         "apple-intelligence",
         "laya"
@@ -110,6 +111,11 @@
       "room": "main-space",
       "x": 13,
       "y": 19
+    },
+    "metabee": {
+      "room": "main-space",
+      "x": 15,
+      "y": 18
     },
     "gemini": {
       "room": "main-space",
