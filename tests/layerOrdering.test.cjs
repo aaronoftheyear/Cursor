@@ -210,49 +210,143 @@ test('Multiple agents sort by feet Y regardless of agent ID', () => {
   assert.strictEqual(queue[3].sortY, 180);
 });
 
-console.log('\n--- Engine Render Pass Order Tests ---\n');
+console.log('\n--- Engine Render Pass Delegation Tests ---\n');
 
-test('Wall-front always on top: not in depth-sorted queue with avatars', () => {
-  // Per engine.ts, wall-front is drawn in PASS 4, after the depth-sorted queue
-  // The buildSortedRenderQueue CAN include wall-front tiles, but engine.ts
-  // calls it with empty wallsFrontTiles array: buildSortedRenderQueue(agents, [], midTiles, [])
-  
-  // Verify engine.ts passes empty array for wallsFrontTiles
+test('Engine delegates rendering to executeRenderPasses', () => {
   const enginePath = path.resolve(__dirname, '../src/engine.ts');
   const engine = fs.readFileSync(enginePath, 'utf-8');
   
-  // Should find: buildSortedRenderQueue(agents, [], midTiles, [])
   assert.ok(
-    engine.includes('buildSortedRenderQueue(agents, [], midTiles, [])'),
-    'Engine should call buildSortedRenderQueue with empty wallsFrontTiles array'
+    engine.includes('executeRenderPasses('),
+    'Engine should call executeRenderPasses'
   );
 });
 
-test('Wall-front drawn in separate pass after depth-sorted queue', () => {
+test('Engine passes wallsFrontTiles to executeRenderPasses', () => {
   const enginePath = path.resolve(__dirname, '../src/engine.ts');
   const engine = fs.readFileSync(enginePath, 'utf-8');
   
-  // Should have PASS 4 comment for wall-front
+  // The executeRenderPasses call should include wallsFrontTiles
   assert.ok(
-    engine.includes('PASS 4: Wall-front'),
-    'Engine should have PASS 4 for wall-front'
-  );
-  
-  // Should iterate wallsFrontTiles after the queue
-  assert.ok(
-    engine.includes('for (const tile of wallsFrontTiles)'),
-    'Engine should iterate wallsFrontTiles separately'
+    engine.includes('wallsFrontTiles,'),
+    'Engine should pass wallsFrontTiles to executeRenderPasses'
   );
 });
 
-test('Shadows drawn before depth-sorted queue (PASS 2)', () => {
-  const enginePath = path.resolve(__dirname, '../src/engine.ts');
-  const engine = fs.readFileSync(enginePath, 'utf-8');
+test('renderQueue.ts has correct pass order documentation', () => {
+  const renderQueuePath = path.resolve(__dirname, '../src/renderQueue.ts');
+  const renderQueue = fs.readFileSync(renderQueuePath, 'utf-8');
   
   assert.ok(
-    engine.includes('PASS 2: Draw ALL shadows'),
-    'Engine should have PASS 2 for shadows'
+    renderQueue.includes('PASS 1: Walkover'),
+    'renderQueue should document PASS 1 for walkover'
   );
+  assert.ok(
+    renderQueue.includes('PASS 2:') && renderQueue.includes('shadow'),
+    'renderQueue should document PASS 2 for shadows'
+  );
+  assert.ok(
+    renderQueue.includes('PASS 3:') && renderQueue.includes('Depth-sorted'),
+    'renderQueue should document PASS 3 for depth-sorted queue'
+  );
+  assert.ok(
+    renderQueue.includes('PASS 4:') && renderQueue.includes('Wall-front'),
+    'renderQueue should document PASS 4 for wall-front'
+  );
+  assert.ok(
+    renderQueue.includes('PASS 5:') && renderQueue.includes('Overlay'),
+    'renderQueue should document PASS 5 for overlay'
+  );
+});
+
+console.log('\n--- executeRenderPasses Draw Call Recording Tests ---\n');
+
+// Test executeRenderPasses by recording draw calls
+function testExecuteRenderPasses() {
+  const testCode = `
+    const m = require('${path.resolve(__dirname, '../src/renderQueue.ts').replace(/\\/g, '\\\\')}');
+    
+    const drawCalls = [];
+    
+    const agents = [
+      { id: 'agent1', feetY: 100, drawShadow: () => drawCalls.push('shadow:agent1'), drawAgent: () => drawCalls.push('agent:agent1') },
+      { id: 'agent2', feetY: 150, drawShadow: () => drawCalls.push('shadow:agent2'), drawAgent: () => drawCalls.push('agent:agent2') },
+    ];
+    const walkoverTiles = [
+      { coord: { x: 5, y: 5 }, sortY: 80, draw: () => drawCalls.push('walkover:5,5') },
+    ];
+    const midTiles = [
+      { coord: { x: 10, y: 10 }, sortY: 120, draw: () => drawCalls.push('mid:10,10') },
+    ];
+    const wallsFrontTiles = [
+      { coord: { x: 8, y: 8 }, sortY: 90, draw: () => drawCalls.push('walls-front:8,8') },
+    ];
+    
+    m.executeRenderPasses(agents, walkoverTiles, midTiles, wallsFrontTiles, () => drawCalls.push('overlay'));
+    
+    console.log(JSON.stringify(drawCalls));
+  `;
+  
+  const result = execSync(`"${path.resolve(__dirname, '../node_modules/.bin/tsx')}" -e "${testCode.replace(/"/g, '\\"').replace(/\n/g, ' ')}"`, {
+    encoding: 'utf-8',
+    cwd: path.resolve(__dirname, '..'),
+  });
+  
+  return JSON.parse(result.trim());
+}
+
+test('executeRenderPasses: walkover draws before shadows (pass 1 before pass 2)', () => {
+  const calls = testExecuteRenderPasses();
+  const walkoverIdx = calls.findIndex(c => c.startsWith('walkover:'));
+  const shadowIdx = calls.findIndex(c => c.startsWith('shadow:'));
+  assert.ok(walkoverIdx < shadowIdx, `Walkover (${walkoverIdx}) should draw before shadow (${shadowIdx})`);
+});
+
+test('executeRenderPasses: all shadows draw before any agent (pass 2 before pass 3)', () => {
+  const calls = testExecuteRenderPasses();
+  const lastShadowIdx = Math.max(...calls.map((c, i) => c.startsWith('shadow:') ? i : -1));
+  const firstAgentIdx = calls.findIndex(c => c.startsWith('agent:'));
+  assert.ok(lastShadowIdx < firstAgentIdx, `Last shadow (${lastShadowIdx}) should draw before first agent (${firstAgentIdx})`);
+});
+
+test('executeRenderPasses: furniture-mid depth-sorts with agents in pass 3', () => {
+  const calls = testExecuteRenderPasses();
+  // mid:10,10 has sortY=120, between agent1 (100) and agent2 (150)
+  const agent1Idx = calls.indexOf('agent:agent1');
+  const midIdx = calls.indexOf('mid:10,10');
+  const agent2Idx = calls.indexOf('agent:agent2');
+  assert.ok(agent1Idx < midIdx, `Agent1 at Y=100 (${agent1Idx}) should draw before mid at Y=120 (${midIdx})`);
+  assert.ok(midIdx < agent2Idx, `Mid at Y=120 (${midIdx}) should draw before agent2 at Y=150 (${agent2Idx})`);
+});
+
+test('executeRenderPasses: wall-front draws AFTER all agents (pass 4 after pass 3)', () => {
+  const calls = testExecuteRenderPasses();
+  const lastAgentIdx = Math.max(...calls.map((c, i) => c.startsWith('agent:') ? i : -1));
+  const wallsFrontIdx = calls.findIndex(c => c.startsWith('walls-front:'));
+  assert.ok(lastAgentIdx < wallsFrontIdx, `Last agent (${lastAgentIdx}) should draw before walls-front (${wallsFrontIdx})`);
+});
+
+test('executeRenderPasses: wall-front draws AFTER furniture-mid (pass 4 after pass 3)', () => {
+  const calls = testExecuteRenderPasses();
+  const midIdx = calls.indexOf('mid:10,10');
+  const wallsFrontIdx = calls.findIndex(c => c.startsWith('walls-front:'));
+  assert.ok(midIdx < wallsFrontIdx, `Mid (${midIdx}) should draw before walls-front (${wallsFrontIdx})`);
+});
+
+test('executeRenderPasses: overlay draws last (pass 5)', () => {
+  const calls = testExecuteRenderPasses();
+  const overlayIdx = calls.indexOf('overlay');
+  assert.strictEqual(overlayIdx, calls.length - 1, 'Overlay should be the last draw call');
+});
+
+test('executeRenderPasses: wall-front at low Y still draws after agent at high Y', () => {
+  // Wall-front at Y=90 should still draw AFTER agent at Y=150
+  // This is the critical test - wall-front is always on top regardless of Y
+  const calls = testExecuteRenderPasses();
+  const agent2Idx = calls.indexOf('agent:agent2');  // Y=150
+  const wallsFrontIdx = calls.indexOf('walls-front:8,8');  // Y=90, but still drawn after
+  assert.ok(agent2Idx < wallsFrontIdx, 
+    `Agent2 at Y=150 (${agent2Idx}) should draw before walls-front at Y=90 (${wallsFrontIdx}) - wall-front always on top!`);
 });
 
 console.log(`\n=== Results: ${passed} passed, ${failed} failed ===\n`);

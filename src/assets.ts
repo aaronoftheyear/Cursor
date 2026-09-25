@@ -271,11 +271,16 @@ class AssetLoader {
 export const assetLoader = new AssetLoader();
 
 /**
- * 144×32 strip [D-w1][D-idle][D-w2][U…][L…] — standard frame order.
- * Each direction triplet: walk1, idle, walk2 (idle in position 1).
+ * 144×32 strip frame order.
+ * After reordering (swap 1↔2 per direction triplet), swapped sprites have:
+ *   position 0 = old walk1 (now used as idle)
+ *   position 1 = old idle
+ *   position 2 = old walk2
+ * Metabee uses original order: position 0 = idle.
+ * STRIP_COL_IDLE=0 means we always draw from position 0.
  */
-const STRIP_COL_WALK1 = 0;
-const STRIP_COL_IDLE = 1;
+const STRIP_COL_IDLE = 0;
+const STRIP_COL_WALK1 = 1;
 const STRIP_COL_WALK2 = 2;
 const STRIP_WALK_COLS = [
   STRIP_COL_WALK1,

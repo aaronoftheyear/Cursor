@@ -121,3 +121,53 @@ export function buildSortedRenderQueue(
   const queue = buildRenderQueue(agents, walkoverTiles, midTiles, wallsFrontTiles);
   return sortRenderQueue(queue);
 }
+
+/**
+ * Execute all render passes in the correct order.
+ *
+ * Pass order:
+ *   1. Walkover tiles (furniture-low)
+ *   2. All shadows
+ *   3. Depth-sorted queue (furniture-mid + agents)
+ *   4. Wall-front tiles (ALWAYS on top of avatars/shadows)
+ *   5. Overlay
+ *
+ * @param agents - Agent render info with drawShadow and drawAgent callbacks
+ * @param walkoverTiles - Walkover tile render info
+ * @param midTiles - Furniture-mid tile render info
+ * @param wallsFrontTiles - Wall-front tile render info
+ * @param drawOverlay - Optional overlay draw callback
+ */
+export function executeRenderPasses(
+  agents: AgentRenderInfo[],
+  walkoverTiles: TileRenderInfo[],
+  midTiles: TileRenderInfo[],
+  wallsFrontTiles: TileRenderInfo[],
+  drawOverlay?: () => void
+): void {
+  // PASS 1: Walkover tiles (under shadows)
+  for (const tile of walkoverTiles) {
+    tile.draw();
+  }
+
+  // PASS 2: All shadows (under furniture-mid and wall-front)
+  for (const agent of agents) {
+    agent.drawShadow();
+  }
+
+  // PASS 3: Depth-sorted queue (furniture-mid + agents only, NOT wall-front)
+  const queue = buildSortedRenderQueue(agents, [], midTiles, []);
+  for (const item of queue) {
+    item.draw();
+  }
+
+  // PASS 4: Wall-front tiles (ALWAYS on top of avatars and shadows)
+  for (const tile of wallsFrontTiles) {
+    tile.draw();
+  }
+
+  // PASS 5: Overlay (always on top)
+  if (drawOverlay) {
+    drawOverlay();
+  }
+}
