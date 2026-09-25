@@ -35,7 +35,8 @@ import {
   TileRenderInfo,
 } from './renderQueue';
 import {
-  resolveNoSpawnTile,
+  filterOutBottomRow,
+  pickEngineSpawnFootTile,
   CollisionMap,
 } from './spawnGuard';
 
@@ -241,24 +242,28 @@ export class GameEngine {
       return this.findNearestWalkableFootTile(agent, preferred);
     }
     
-    // No spawn point defined - use resolveNoSpawnTile which filters out bottom row
     const collisionMap = this.buildCollisionMap();
     if (!collisionMap) return null;
-    
+
     const room = gameMap.getRoomForAgent(agentId) ?? null;
     const bottomRow = collisionMap.height - 1;
-    const tile = resolveNoSpawnTile(collisionMap, room, bottomRow);
-    
-    // Validate the tile is also available (not occupied by another agent)
+    const tile = pickEngineSpawnFootTile(
+      collisionMap,
+      room,
+      this.getAllWalkableTiles(agent)
+    );
+
     if (tile && this.canOccupyTile(tile.x, tile.y, agent)) {
       return tile;
     }
-    
-    // Fall back to any walkable tile that passes full validation
-    const candidates = this.getAllWalkableTiles(agent).filter(t => t.y !== bottomRow);
+
+    const candidates = filterOutBottomRow(this.getAllWalkableTiles(agent), bottomRow);
     if (candidates.length > 0) {
       const idx = Math.floor(Math.random() * candidates.length);
-      return candidates[idx];
+      const fallback = candidates[idx];
+      if (this.canOccupyTile(fallback.x, fallback.y, agent)) {
+        return fallback;
+      }
     }
     return null;
   }
@@ -271,7 +276,7 @@ export class GameEngine {
     }
     // Filter out bottom row (reserved for map edge)
     const bottomRow = this.mapGrid ? this.mapGrid.height - 1 : -1;
-    candidates = candidates.filter(t => t.y !== bottomRow);
+    candidates = filterOutBottomRow(candidates, bottomRow);
     if (candidates.length === 0) return null;
     let best = candidates[0];
     let bestDist = Number.POSITIVE_INFINITY;
@@ -1427,6 +1432,12 @@ export class GameEngine {
   ): void {
     const agent = this.getAgent(agentId);
     if (!agent) return;
+    if (!this.canEnterFootTile(tileX, tileY, agent)) {
+      console.warn(
+        `[debugPin] blocked foot tile (${tileX}, ${tileY}) for ${agentId}; pin skipped`
+      );
+      return;
+    }
     agent.visibleOnMap = true;
     this.agentDismissing.delete(agentId);
     this.agentTerminalMarch.delete(agentId);
