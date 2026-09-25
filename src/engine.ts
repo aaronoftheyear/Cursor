@@ -1417,4 +1417,41 @@ export class GameEngine {
   selectAgent(agentId: string | null): void {
     this.state.selectedAgent = agentId;
   }
+
+  /** Dev/screenshot: pin agent foot tile and pause wandering. */
+  pinAgentAtFootTile(
+    agentId: string,
+    tileX: number,
+    tileY: number,
+    facing: 'left' | 'right' | 'up' | 'down' = 'down'
+  ): void {
+    const agent = this.getAgent(agentId);
+    if (!agent) return;
+    agent.visibleOnMap = true;
+    this.agentDismissing.delete(agentId);
+    this.agentTerminalMarch.delete(agentId);
+    this.agentTilePaths.set(agentId, []);
+    const layout = this.renderer.getLayout();
+    const pos = this.spawnPixels(layout, tileX, tileY, agentId);
+    agent.x = pos.x;
+    agent.y = pos.y;
+    agent.targetX = pos.x;
+    agent.targetY = pos.y;
+    agent.direction = facing;
+    agent.locomotion = 'stand';
+    agent.frame = 0;
+    agent.status = 'idle';
+    this.wanderTimers.set(agentId, Number.MAX_SAFE_INTEGER);
+  }
+
+  getMapLayout(): MapLayout {
+    return this.renderer.getLayout();
+  }
+
+  /** Dev/screenshot: show only listed agents (null = show all). */
+  setDebugAgentVisibility(visibleIds: string[] | null): void {
+    for (const agent of this.state.agents) {
+      agent.visibleOnMap = visibleIds === null || visibleIds.includes(agent.id);
+    }
+  }
 }
