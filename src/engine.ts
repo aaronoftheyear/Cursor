@@ -391,6 +391,12 @@ export class GameEngine {
     return { x: tileXs[0], y: footTileY };
   }
 
+  /** Per-agent feet Y position in pixels, used for depth sorting. */
+  private agentFeetY(agent: Agent): number {
+    const size = this.renderer.spritePixelSize(agent.id);
+    return agent.y + size.height;
+  }
+
   private canEnterFootTile(tileX: number, footTileY: number, agent: Agent): boolean {
     if (this.mapGrid && !this.mapGrid.isBlockedForFootprint([tileX], footTileY)) {
       return true;
@@ -866,7 +872,21 @@ export class GameEngine {
     this.renderer.drawAgentConnections(this.state.agents);
     
     const layout = this.renderer.getLayout();
-    const spriteHeight = this.renderer.spritePixelSize().height;
+    
+    // Depth-sorted render queue. Items are sorted by sortY (Y position of feet/bottom),
+    // then by order (layer priority). Lower sortY = higher on screen = drawn first.
+    // At same sortY, lower order = drawn first (underneath).
+    //
+    // Layer ordering (Tiled layer → render order):
+    //   grass/floor    → background (baked into mapBackground)
+    //   furniture-low  → DRAW_WALKOVER (0)  - walkable, under avatar
+    //   walls          → collision only (baked into mapBackground)
+    //   furniture-mid  → DRAW_MID (-10)     - collision, depth sorted with avatar
+    //   furniture-high → overlay (drawn after queue, always on top of avatar)
+    //   wall-front     → DRAW_WALLS_FRONT (20) - collision, always on top of avatar+shadow
+    //
+    // Shadow rule: always drawn under furniture-mid and avatar at same Y (order -20).
+    // Depth sorting: items at lower Y (higher on screen) draw first (behind).
     type DrawItem = { sortY: number; order: number; draw: () => void };
     const queue: DrawItem[] = [];
     const DRAW_SHADOW = -20;
@@ -875,12 +895,25 @@ export class GameEngine {
     const DRAW_AGENT = 10;
     const DRAW_WALLS_FRONT = 20;
 
+    // Add shadows and agents with per-agent sprite height for consistent depth sorting.
+    // The sortY must match the actual feet position used by collision detection.
     for (const agent of this.state.agents) {
       if (!this.isAgentDrawn(agent)) continue;
+      const agentFeetY = this.agentFeetY(agent);
       queue.push({
-        sortY: agent.y + spriteHeight,
+        sortY: agentFeetY,
         order: DRAW_SHADOW,
         draw: () => this.renderer.drawAgentShadow(agent),
+      });
+      queue.push({
+        sortY: agentFeetY,
+        order: DRAW_AGENT,
+        draw: () =>
+          this.renderer.drawAgent(
+            agent,
+            agent.id === this.state.selectedAgent,
+            false
+          ),
       });
     }
 
@@ -900,20 +933,6 @@ export class GameEngine {
       });
     }
 
-    for (const agent of this.state.agents) {
-      if (!this.isAgentDrawn(agent)) continue;
-      queue.push({
-        sortY: agent.y + spriteHeight,
-        order: DRAW_AGENT,
-        draw: () =>
-          this.renderer.drawAgent(
-            agent,
-            agent.id === this.state.selectedAgent,
-            false
-          ),
-      });
-    }
-
     for (const { x, y } of this.renderer.getWallsFrontTiles()) {
       queue.push({
         sortY: this.renderer.tileFootSortY(layout, y),
@@ -927,6 +946,7 @@ export class GameEngine {
       item.draw();
     }
 
+    // Overlay (furniture-high) is always drawn on top of everything
     this.renderer.drawMapOverlay(layout);
 
     if (this.state.selectedAgent) {
