@@ -227,6 +227,57 @@ test('After sessionEnd with sessions=0, new activity still works', () => {
   assertEqual(status?.status, 'working', 'Agent should be working during turn 2, not reset to idle');
 });
 
+// External agent status (grokbot, metabee)
+console.log('\n--- External Agent Status (set-agent-status.sh) ---\n');
+
+const EXTERNAL_AGENTS_FILE = path.join(PROJECT_ROOT, '.dashboard', 'external-agents.json');
+const STATUS_SCRIPT_PATH = path.join(PROJECT_ROOT, 'scripts', 'set-agent-status.sh');
+
+function runExternalStatusScript(agentId, status, options = []) {
+  const args = [agentId, status, ...options];
+  const result = spawnSync('bash', [STATUS_SCRIPT_PATH, ...args], {
+    encoding: 'utf-8',
+    cwd: PROJECT_ROOT,
+  });
+  return result;
+}
+
+function readExternalAgents() {
+  try {
+    return JSON.parse(fs.readFileSync(EXTERNAL_AGENTS_FILE, 'utf-8'));
+  } catch {
+    return { agents: {} };
+  }
+}
+
+test('set-agent-status.sh works for grokbot', () => {
+  runExternalStatusScript('grokbot', 'working', ['-a', 'researching', '-m', 'Test grokbot']);
+  const data = readExternalAgents();
+  assertEqual(data.agents.grokbot?.status, 'working');
+  assertEqual(data.agents.grokbot?.activity, 'researching');
+});
+
+test('set-agent-status.sh works for metabee (new agent)', () => {
+  runExternalStatusScript('metabee', 'working', ['-a', 'reading', '-m', 'Test metabee']);
+  const data = readExternalAgents();
+  assertEqual(data.agents.metabee?.status, 'working');
+  assertEqual(data.agents.metabee?.activity, 'reading');
+});
+
+test('set-agent-status.sh: metabee idle', () => {
+  runExternalStatusScript('metabee', 'idle');
+  const data = readExternalAgents();
+  assertEqual(data.agents.metabee?.status, 'idle');
+});
+
+test('set-agent-status.sh: grokbot github activity', () => {
+  runExternalStatusScript('grokbot', 'working', ['-a', 'github', '-d', 'deep', '-m', 'Pushing']);
+  const data = readExternalAgents();
+  assertEqual(data.agents.grokbot?.status, 'working');
+  assertEqual(data.agents.grokbot?.activity, 'github');
+  assertEqual(data.agents.grokbot?.activityDepth, 'deep');
+});
+
 // Summary
 console.log(`\n=== Results: ${passed} passed, ${failed} failed ===\n`);
 

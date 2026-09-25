@@ -96,6 +96,18 @@ export const AGENT_CONFIGS: Omit<
     role: 'agent',
   },
   {
+    id: 'metabee',
+    name: 'Metabee',
+    description: 'Aaron\'s desktop assistant. A versatile helper for research, automation, and general tasks.',
+    color: '#f59e0b',
+    secondaryColor: '#d97706',
+    status: 'idle',
+    direction: 'down',
+    specialties: ['research', 'automation', 'desktop', 'assistant', 'general'],
+    sprite: AGENT_SPRITES.stand,
+    role: 'agent',
+  },
+  {
     id: 'claude',
     name: 'Claude',
     description: 'Anthropic\'s helpful AI assistant. Excellent for analysis, writing, and thoughtful conversations.',

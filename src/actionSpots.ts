@@ -42,7 +42,7 @@ interface ActionSpotOverride extends ActionSpotRule {}
 
 export const CURSOR_AGENT_IDS = ['jarvis', 'friday', 'cursor', 'cursor-grunt', 'bumblebee'] as const;
 export const CLAUDE_AGENT_IDS = ['claude', 'claude-code', 'claude-cowork'] as const;
-export const MAIN_AGENT_IDS = ['grokbot', 'gemini', 'apple-intelligence', 'laya'] as const;
+export const MAIN_AGENT_IDS = ['grokbot', 'metabee', 'gemini', 'apple-intelligence', 'laya'] as const;
 
 /** Match `public/assets/maps/hq.json` room bounds (tile coords). */
 const MAIN_SPACE_MIN_Y = 15;
