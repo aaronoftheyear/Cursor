@@ -149,7 +149,7 @@ function mergeExternalAgents(
     let waitingOnFinished = false
     if (extStatus.waitingOn && !isStale) {
       const waitingOnId = extStatus.waitingOn
-      const waitingOnLower = waitingOnId.toLowerCase()
+      const waitingOnLower = waitingOnId.toLowerCase().trim()
       
       // First check if it's a direct bc-ID reference
       if (waitingOnId.startsWith('bc-')) {
@@ -171,15 +171,20 @@ function mergeExternalAgents(
         }
       }
       
-      // Check by name match in cloud agents (using cloudAgentName, not detail)
-      if (!waitingOnFinished) {
+      // Check by name match - must be non-empty and case-insensitive exact match
+      // Check ALL agents, not just first match (a RUNNING agent shouldn't block check)
+      if (!waitingOnFinished && waitingOnLower) {
         for (const [, cloudAgent] of cloudAgentByIdCache) {
-          if (cloudAgent.cloudAgentName?.toLowerCase().includes(waitingOnLower) ||
-              waitingOnLower.includes(cloudAgent.cloudAgentName?.toLowerCase() || '')) {
+          const agentName = cloudAgent.cloudAgentName?.toLowerCase().trim()
+          // Skip empty names - they should never match
+          if (!agentName) continue
+          // Case-insensitive exact match only
+          if (agentName === waitingOnLower) {
             if (cloudAgent.status === 'idle') {
               waitingOnFinished = true
+              break
             }
-            break
+            // Found matching agent but it's still running - don't clear
           }
         }
       }
@@ -340,6 +345,19 @@ function mergeCloudAgents(live: LiveStatus, cloudStatus: Map<string, CloudAgentS
   return merged
 }
 
+function agentsChanged(before: Record<string, AgentStatus>, after: Record<string, AgentStatus>): boolean {
+  const allKeys = new Set([...Object.keys(before), ...Object.keys(after)])
+  for (const key of allKeys) {
+    const a = before[key]
+    const b = after[key]
+    if (!a || !b) return true
+    if (a.status !== b.status) return true
+    if (a.activity !== b.activity) return true
+    if (a.detail !== b.detail) return true
+  }
+  return false
+}
+
 function createLiveStatusMiddleware(cursorApiKey: string | undefined) {
   return async function liveStatusMiddleware(
     _req: Connect.IncomingMessage,
@@ -356,6 +374,9 @@ function createLiveStatusMiddleware(cursorApiKey: string | undefined) {
     const external = readJsonSafe<ExternalAgents>(externalPath, { agents: {} })
     const linksConfig = readJsonSafe<AgentLinksConfig>(linksPath, { version: 1, agents: {} })
 
+    // Capture original agent state for comparison
+    const originalAgents = { ...live.agents }
+
     live = healStaleAgents(live)
 
     // Poll cloud agents first so we can use their status for waiting-on checks
@@ -367,9 +388,12 @@ function createLiveStatusMiddleware(cursorApiKey: string | undefined) {
     // Finally merge cloud agent status
     merged = mergeCloudAgents(merged, cloudStatus)
 
-    // Always set a fresh updatedAt so the frontend knows the response is new
-    // (even if agent data hasn't changed, expiry/waiting state may have)
-    merged.updatedAt = new Date().toISOString()
+    // Only bump updatedAt when agents actually changed
+    if (agentsChanged(originalAgents, merged.agents)) {
+      merged.updatedAt = new Date().toISOString()
+    } else if (!merged.updatedAt) {
+      merged.updatedAt = new Date().toISOString()
+    }
 
     res.statusCode = 200
     res.setHeader('Content-Type', 'application/json')

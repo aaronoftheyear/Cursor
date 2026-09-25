@@ -18,13 +18,11 @@ const PROJECT_ROOT = path.resolve(__dirname, '..');
 const HOOK_SCRIPT = path.join(PROJECT_ROOT, '.cursor', 'hooks', 'claude-code-hook.cjs');
 const UPDATE_SCRIPT = path.join(PROJECT_ROOT, '.cursor', 'hooks', 'update-dashboard-status.py');
 const STATUS_SCRIPT = path.join(PROJECT_ROOT, 'scripts', 'set-agent-status.sh');
-const STATUS_FILE = path.join(PROJECT_ROOT, '.dashboard', 'live-status.json');
-const EXTERNAL_FILE = path.join(PROJECT_ROOT, '.dashboard', 'external-agents.json');
-const SEEN_EVENTS_FILE = path.join(PROJECT_ROOT, '.dashboard', 'seen-events.json');
 
 let passed = 0;
 let failed = 0;
 let tempDir = null;
+let pythonTempDir = null;
 
 function test(name, fn) {
   try {
@@ -56,11 +54,31 @@ function assertTrue(value, msg = '') {
   }
 }
 
-// Setup temp directory for external agent tests only
+// Setup temp directory for external agent tests
 function setupTempDir() {
   tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'dashboard-test-'));
   fs.mkdirSync(path.join(tempDir, '.dashboard'), { recursive: true });
   return tempDir;
+}
+
+// Setup temp directory for Python hook tests (uses temp .dashboard)
+function setupPythonTempDir() {
+  pythonTempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'dashboard-python-test-'));
+  fs.mkdirSync(path.join(pythonTempDir, '.dashboard'), { recursive: true });
+  fs.mkdirSync(path.join(pythonTempDir, 'public', 'assets'), { recursive: true });
+  
+  // Copy agent-links.json to temp dir for proper routing
+  const srcLinks = path.join(PROJECT_ROOT, 'public', 'assets', 'agent-links.json');
+  const destLinks = path.join(pythonTempDir, 'public', 'assets', 'agent-links.json');
+  if (fs.existsSync(srcLinks)) {
+    fs.copyFileSync(srcLinks, destLinks);
+  }
+  
+  // Create empty live-status.json in public for mirror writes
+  const publicStatus = path.join(pythonTempDir, 'public', 'live-status.json');
+  fs.writeFileSync(publicStatus, '{}');
+  
+  return pythonTempDir;
 }
 
 function cleanupTempDir() {
@@ -69,16 +87,16 @@ function cleanupTempDir() {
   }
 }
 
-function cleanProjectState() {
-  // Clean project state for Python hook tests
-  try { fs.unlinkSync(STATUS_FILE); } catch {}
-  try { fs.unlinkSync(SEEN_EVENTS_FILE); } catch {}
-  fs.mkdirSync(path.dirname(STATUS_FILE), { recursive: true });
+function cleanupPythonTempDir() {
+  if (pythonTempDir && fs.existsSync(pythonTempDir)) {
+    fs.rmSync(pythonTempDir, { recursive: true, force: true });
+  }
 }
 
 function readStatus() {
+  const statusFile = path.join(pythonTempDir, '.dashboard', 'live-status.json');
   try {
-    return JSON.parse(fs.readFileSync(STATUS_FILE, 'utf-8'));
+    return JSON.parse(fs.readFileSync(statusFile, 'utf-8'));
   } catch {
     return null;
   }
@@ -93,14 +111,14 @@ function readTempExternalAgents() {
   }
 }
 
-// Run the Python hook script with Claude-style payload
+// Run the Python hook script with Claude-style payload (uses pythonTempDir)
 function runPythonHook(event, payload = {}) {
   const fullPayload = {
     ...payload,
     generation_id: `gen-${Date.now()}-${Math.random().toString(36).slice(2)}`,
     session_id: payload.session_id || 'test-claude-session',
     timestamp: Date.now(),
-    workspace_roots: [PROJECT_ROOT],
+    workspace_roots: [pythonTempDir],
     source: 'claude-code',
     claude_code: true,
     agent_name: 'claude-code',
@@ -109,7 +127,11 @@ function runPythonHook(event, payload = {}) {
   const result = spawnSync('python3', [UPDATE_SCRIPT, event], {
     input: JSON.stringify(fullPayload),
     encoding: 'utf-8',
-    cwd: PROJECT_ROOT,
+    cwd: pythonTempDir,
+    env: {
+      ...process.env,
+      DASHBOARD_PROJECT_ROOT: pythonTempDir,
+    },
   });
 
   if (result.error) throw result.error;
@@ -175,7 +197,7 @@ test('claude-code-hook.cjs ignores Notification', () => {
 // Test Claude Code events via update-dashboard-status.py
 console.log('\n--- Claude Code Status Updates (via Python hook) ---\n');
 
-cleanProjectState();
+setupPythonTempDir();
 
 test('sessionStart: claude-code agent becomes working', () => {
   runPythonHook('sessionStart', {});
@@ -244,6 +266,24 @@ test('preToolUse Bash with git commit: claude-code is github', () => {
   assertEqual(status?.agents?.['claude-code']?.activity, 'github');
 });
 
+test('preToolUse Bash with "echo high score": NOT github (substring fix)', () => {
+  runPythonHook('preToolUse', { tool_name: 'bash', command: 'echo high score' });
+  const status = readStatus();
+  assertEqual(status?.agents?.['claude-code']?.activity, 'running');
+});
+
+test('preToolUse Bash with "echo gh is great": NOT github', () => {
+  runPythonHook('preToolUse', { tool_name: 'bash', command: 'echo gh is great' });
+  const status = readStatus();
+  assertEqual(status?.agents?.['claude-code']?.activity, 'running');
+});
+
+test('preToolUse Bash with "sudo gh pr list": IS github', () => {
+  runPythonHook('preToolUse', { tool_name: 'bash', command: 'sudo gh pr list' });
+  const status = readStatus();
+  assertEqual(status?.agents?.['claude-code']?.activity, 'github');
+});
+
 test('preToolUse WebSearch: claude-code is researching', () => {
   runPythonHook('preToolUse', { tool_name: 'websearch' });
   const status = readStatus();
@@ -255,6 +295,9 @@ test('stop: claude-code goes idle', () => {
   const status = readStatus();
   assertEqual(status?.agents?.['claude-code']?.status, 'idle');
 });
+
+// Cleanup Python temp dir
+cleanupPythonTempDir();
 
 // Test TTL feature in set-agent-status.sh (uses temp dir)
 console.log('\n--- TTL Feature Tests (temp dir) ---\n');

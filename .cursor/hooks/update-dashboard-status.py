@@ -8,9 +8,11 @@ import json
 import sys
 import time
 from datetime import datetime, timezone
+import os
 from pathlib import Path
 
-PROJECT_ROOT = Path(__file__).resolve().parents[2]
+# Support PROJECT_ROOT override for testing
+PROJECT_ROOT = Path(os.environ.get("DASHBOARD_PROJECT_ROOT", Path(__file__).resolve().parents[2]))
 STATUS_DIR = PROJECT_ROOT / ".dashboard"
 STATUS_FILE = STATUS_DIR / "live-status.json"
 PUBLIC_MIRROR = PROJECT_ROOT / "public" / "live-status.json"
@@ -475,16 +477,54 @@ def tool_name(hook: dict) -> str:
 
 
 def is_github_shell_command(cmd: str) -> bool:
-    """Check if shell command contains a GitHub/git operation anywhere in the chain."""
+    """Check if shell command contains a GitHub/git operation anywhere in the chain.
+    
+    Splits on &&, ;, | to find actual command words, avoiding false positives
+    like "echo high score" matching "gh ".
+    """
     if not cmd or not isinstance(cmd, str):
         return False
-    cmd_lower = cmd.lower()
-    # Check for gh CLI anywhere in command (handles `cd x && gh ...`, pipes, etc.)
-    if "gh " in cmd_lower or cmd_lower.endswith("gh"):
-        return True
-    # Check for git operations anywhere in command
-    git_ops = ("git push", "git pull", "git fetch", "git clone", "git commit", "git status")
-    return any(op in cmd_lower for op in git_ops)
+    
+    import re
+    # Split on shell separators: &&, ||, ;, |, and also handle subshells
+    segments = re.split(r'\s*(?:&&|\|\||[;|])\s*', cmd)
+    
+    for segment in segments:
+        segment = segment.strip()
+        if not segment:
+            continue
+        
+        # Get the first word (the command itself), handling leading whitespace/cd/etc
+        # e.g., "cd /tmp && gh pr list" -> segments ["cd /tmp", "gh pr list"]
+        words = segment.split()
+        if not words:
+            continue
+        
+        # The command is typically the first word, but handle common prefixes
+        cmd_word = words[0].lower()
+        
+        # Skip common shell prefixes to find the actual command
+        i = 0
+        while i < len(words) and words[i].lower() in ('cd', 'pushd', 'env', 'sudo', 'time', 'nice', 'nohup'):
+            i += 1
+            # For cd/pushd, skip the path argument too
+            if words[i - 1].lower() in ('cd', 'pushd') and i < len(words):
+                i += 1
+        
+        if i < len(words):
+            cmd_word = words[i].lower()
+        
+        # Check for gh CLI (must be the command word, not substring)
+        if cmd_word == 'gh':
+            return True
+        
+        # Check for git operations (git must be the command word)
+        if cmd_word == 'git' and len(words) > i + 1:
+            git_subcommand = words[i + 1].lower()
+            if git_subcommand in ('push', 'pull', 'fetch', 'clone', 'commit', 'status'):
+                return True
+    
+    return False
 
 
 def activity_from_hook(event: str, hook: dict) -> tuple[str, str]:
