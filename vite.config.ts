@@ -4,7 +4,8 @@ import type { Connect } from 'vite'
 import { defineConfig, loadEnv } from 'vite'
 import {
   mergeExternalAgents,
-  fetchCloudAgentById,
+  createUpdatedAtState,
+  computeUpdatedAt,
   type AgentStatus,
   type LiveStatus,
   type ExternalAgents,
@@ -36,8 +37,7 @@ let cloudPollTime = 0
 const CLOUD_POLL_INTERVAL_MS = 30_000
 
 // Track last sent response for updatedAt comparison
-let lastSentAgents: Record<string, AgentStatus> = {}
-let lastSentUpdatedAt: string | null = null
+const updatedAtState = createUpdatedAtState()
 
 function readJsonSafe<T>(filePath: string, fallback: T): T {
   try {
@@ -232,19 +232,6 @@ function mergeCloudAgents(live: LiveStatus, cloudStatus: Map<string, CloudAgentS
   return merged
 }
 
-function agentsChanged(before: Record<string, AgentStatus>, after: Record<string, AgentStatus>): boolean {
-  const allKeys = new Set([...Object.keys(before), ...Object.keys(after)])
-  for (const key of allKeys) {
-    const a = before[key]
-    const b = after[key]
-    if (!a || !b) return true
-    if (a.status !== b.status) return true
-    if (a.activity !== b.activity) return true
-    if (a.detail !== b.detail) return true
-  }
-  return false
-}
-
 function createLiveStatusMiddleware(cursorApiKey: string | undefined) {
   return async function liveStatusMiddleware(
     _req: Connect.IncomingMessage,
@@ -272,18 +259,8 @@ function createLiveStatusMiddleware(cursorApiKey: string | undefined) {
     // Finally merge cloud agent status
     merged = mergeCloudAgents(merged, cloudStatus)
 
-    // Only bump updatedAt when agents actually changed from last sent response
-    if (agentsChanged(lastSentAgents, merged.agents)) {
-      merged.updatedAt = new Date().toISOString()
-      lastSentAgents = { ...merged.agents }
-      lastSentUpdatedAt = merged.updatedAt
-    } else {
-      // Re-send last sent timestamp (or initialize if first request)
-      merged.updatedAt = lastSentUpdatedAt || new Date().toISOString()
-      if (!lastSentUpdatedAt) {
-        lastSentUpdatedAt = merged.updatedAt
-      }
-    }
+    // Compute updatedAt (bumps on change, re-sends last on no-change)
+    merged.updatedAt = computeUpdatedAt(merged.agents, updatedAtState)
 
     res.statusCode = 200
     res.setHeader('Content-Type', 'application/json')

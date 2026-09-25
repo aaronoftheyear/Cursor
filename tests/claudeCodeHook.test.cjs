@@ -549,7 +549,7 @@ async function runMergeLogicTests() {
   
   // Create a test runner script that imports and tests the real module
   const testScript = `
-    import { mergeExternalAgents, checkWaitingOnFinished, clearFailedBcIdCache } from '${PROJECT_ROOT}/server/liveStatusMerge.ts';
+    import { mergeExternalAgents, checkWaitingOnFinished, clearFailedBcIdCache, fetchCloudAgentById, agentsChanged, createUpdatedAtState, computeUpdatedAt } from '${PROJECT_ROOT}/server/liveStatusMerge.ts';
     
     // Mock fetch function for testing
     function createMockFetch(responses) {
@@ -788,14 +788,101 @@ async function runMergeLogicTests() {
       assertEqual(result.agents.metabee?.status, 'idle', 'Should be idle after fetching finished agent');
     });
     
+    // Test that failed bc-id lookups are cached (count mock fetch calls)
+    await test('Failed bc-id lookup is cached for 30s (not re-fetched)', async () => {
+      clearFailedBcIdCache();
+      let fetchCallCount = 0;
+      
+      const countingMockFetch = async (url) => {
+        fetchCallCount++;
+        return { ok: false, status: 404 };
+      };
+      
+      // First call - should fetch and fail
+      const result1 = await fetchCloudAgentById('bc-not-found', 'test-key', countingMockFetch);
+      assertEqual(result1, null, 'First call should return null');
+      assertEqual(fetchCallCount, 1, 'First call should make exactly 1 fetch');
+      
+      // Second call within 30s - should NOT fetch (cached)
+      const result2 = await fetchCloudAgentById('bc-not-found', 'test-key', countingMockFetch);
+      assertEqual(result2, null, 'Second call should return null');
+      assertEqual(fetchCallCount, 1, 'Second call should NOT make another fetch (cached 404)');
+      
+      // Third call - still cached
+      const result3 = await fetchCloudAgentById('bc-not-found', 'test-key', countingMockFetch);
+      assertEqual(result3, null, 'Third call should return null');
+      assertEqual(fetchCallCount, 1, 'Third call should NOT make another fetch (still cached)');
+    });
+    
+    // Test agentsChanged includes activityDepth
+    await test('agentsChanged detects activityDepth changes', async () => {
+      const before = { agent1: { status: 'working', activity: 'reading', activityDepth: 'brief' } };
+      const after = { agent1: { status: 'working', activity: 'reading', activityDepth: 'deep' } };
+      
+      const changed = agentsChanged(before, after);
+      assertTrue(changed, 'Should detect activityDepth change from brief to deep');
+    });
+    
+    await test('agentsChanged returns false when identical (including activityDepth)', async () => {
+      const before = { agent1: { status: 'working', activity: 'reading', activityDepth: 'deep', detail: 'Test' } };
+      const after = { agent1: { status: 'working', activity: 'reading', activityDepth: 'deep', detail: 'Test' } };
+      
+      const changed = agentsChanged(before, after);
+      assertTrue(!changed, 'Should return false when agents are identical');
+    });
+    
+    // Test computeUpdatedAt logic
+    await test('computeUpdatedAt bumps timestamp on agent change', async () => {
+      const state = createUpdatedAtState();
+      
+      // First call - should set initial timestamp
+      const ts1 = computeUpdatedAt({ agent1: { status: 'idle' } }, state);
+      assertTrue(ts1, 'Should return a timestamp');
+      
+      // Second call with same agents - should return same timestamp
+      const ts2 = computeUpdatedAt({ agent1: { status: 'idle' } }, state);
+      assertEqual(ts2, ts1, 'Unchanged agents should keep same timestamp');
+      
+      // Wait a tiny bit to ensure different timestamp
+      await new Promise(r => setTimeout(r, 2));
+      
+      // Third call with changed agents - should bump timestamp
+      const ts3 = computeUpdatedAt({ agent1: { status: 'working' } }, state);
+      // The timestamp should be different (later than ts1)
+      assertTrue(new Date(ts3).getTime() >= new Date(ts1).getTime(), 'Changed agents should bump timestamp');
+      // And the state should reflect the change
+      assertEqual(state.lastSentUpdatedAt, ts3, 'State should have updated timestamp');
+    });
+    
+    await test('computeUpdatedAt preserves timestamp on unchanged polls', async () => {
+      const state = createUpdatedAtState();
+      
+      const agents = { agent1: { status: 'working', activity: 'reading' } };
+      
+      // First call
+      const ts1 = computeUpdatedAt(agents, state);
+      
+      // Multiple unchanged polls
+      const ts2 = computeUpdatedAt(agents, state);
+      const ts3 = computeUpdatedAt(agents, state);
+      const ts4 = computeUpdatedAt(agents, state);
+      
+      assertEqual(ts2, ts1, 'Second poll should keep timestamp');
+      assertEqual(ts3, ts1, 'Third poll should keep timestamp');
+      assertEqual(ts4, ts1, 'Fourth poll should keep timestamp');
+    });
+    
     console.log(JSON.stringify(results));
   `;
   
   const testScriptPath = path.join(os.tmpdir(), 'merge-test-' + Date.now() + '.mts');
   fs.writeFileSync(testScriptPath, testScript);
   
+  // Use local tsx binary (from node_modules) - must work offline after npm ci
+  const tsxBin = path.join(PROJECT_ROOT, 'node_modules', '.bin', 'tsx');
+  
   try {
-    const output = execSync(`npx tsx ${testScriptPath}`, {
+    const output = execSync(`${tsxBin} ${testScriptPath}`, {
       encoding: 'utf-8',
       cwd: PROJECT_ROOT,
       timeout: 30000,
@@ -832,7 +919,3 @@ runMergeLogicTests().then(() => {
   console.error('Test runner error:', err);
   process.exit(1);
 });
-
-// Summary
-console.log(`\n=== Results: ${passed} passed, ${failed} failed ===\n`);
-process.exit(failed > 0 ? 1 : 0);

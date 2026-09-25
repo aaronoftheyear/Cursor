@@ -236,3 +236,52 @@ export async function mergeExternalAgents(
 export function clearFailedBcIdCache(): void {
   failedBcIdCache.clear()
 }
+
+// Compare agent states to detect changes
+export function agentsChanged(
+  before: Record<string, AgentStatus>,
+  after: Record<string, AgentStatus>
+): boolean {
+  const allKeys = new Set([...Object.keys(before), ...Object.keys(after)])
+  for (const key of allKeys) {
+    const a = before[key]
+    const b = after[key]
+    if (!a || !b) return true
+    if (a.status !== b.status) return true
+    if (a.activity !== b.activity) return true
+    if (a.detail !== b.detail) return true
+    if (a.activityDepth !== b.activityDepth) return true
+  }
+  return false
+}
+
+// Manages updatedAt timestamp state for response consistency
+export interface UpdatedAtState {
+  lastSentAgents: Record<string, AgentStatus>
+  lastSentUpdatedAt: string | null
+}
+
+export function createUpdatedAtState(): UpdatedAtState {
+  return {
+    lastSentAgents: {},
+    lastSentUpdatedAt: null,
+  }
+}
+
+export function computeUpdatedAt(
+  mergedAgents: Record<string, AgentStatus>,
+  state: UpdatedAtState
+): string {
+  if (agentsChanged(state.lastSentAgents, mergedAgents)) {
+    const newTimestamp = new Date().toISOString()
+    state.lastSentAgents = { ...mergedAgents }
+    state.lastSentUpdatedAt = newTimestamp
+    return newTimestamp
+  } else {
+    // Re-send last sent timestamp (or initialize if first request)
+    if (!state.lastSentUpdatedAt) {
+      state.lastSentUpdatedAt = new Date().toISOString()
+    }
+    return state.lastSentUpdatedAt
+  }
+}
