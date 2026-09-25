@@ -34,6 +34,10 @@ import {
   AgentRenderInfo,
   TileRenderInfo,
 } from './renderQueue';
+import {
+  resolveNoSpawnTile,
+  CollisionMap,
+} from './spawnGuard';
 
 const MOVE_SPEED = 1.15;
 const WORK_MOVE_SPEED = 1.25;
@@ -237,15 +241,24 @@ export class GameEngine {
       return this.findNearestWalkableFootTile(agent, preferred);
     }
     
-    // No spawn point defined - prefer walkable tile in agent's room, fall back to any walkable
-    let walkable = this.getWalkableTilesInRoom(agent);
-    if (walkable.length === 0) {
-      walkable = this.getAllWalkableTiles(agent);
+    // No spawn point defined - use resolveNoSpawnTile which filters out bottom row
+    const collisionMap = this.buildCollisionMap();
+    if (!collisionMap) return null;
+    
+    const room = gameMap.getRoomForAgent(agentId) ?? null;
+    const bottomRow = collisionMap.height - 1;
+    const tile = resolveNoSpawnTile(collisionMap, room, bottomRow);
+    
+    // Validate the tile is also available (not occupied by another agent)
+    if (tile && this.canOccupyTile(tile.x, tile.y, agent)) {
+      return tile;
     }
-    if (walkable.length > 0) {
-      const idx = Math.floor(Math.random() * walkable.length);
-      const tile = walkable[idx];
-      return tile ?? null;
+    
+    // Fall back to any walkable tile that passes full validation
+    const candidates = this.getAllWalkableTiles(agent).filter(t => t.y !== bottomRow);
+    if (candidates.length > 0) {
+      const idx = Math.floor(Math.random() * candidates.length);
+      return candidates[idx];
     }
     return null;
   }
@@ -256,6 +269,9 @@ export class GameEngine {
     if (candidates.length === 0) {
       candidates = this.getAllWalkableTiles(agent);
     }
+    // Filter out bottom row (reserved for map edge)
+    const bottomRow = this.mapGrid ? this.mapGrid.height - 1 : -1;
+    candidates = candidates.filter(t => t.y !== bottomRow);
     if (candidates.length === 0) return null;
     let best = candidates[0];
     let bestDist = Number.POSITIVE_INFINITY;
@@ -434,6 +450,17 @@ export class GameEngine {
   private canOccupyTile(tileX: number, footTileY: number, agent: Agent): boolean {
     const pos = this.spawnPixels(this.renderer.getLayout(), tileX, footTileY, agent.id);
     return this.canOccupy(agent, pos.x, pos.y) && this.canEnterFootTile(tileX, footTileY, agent);
+  }
+
+  private buildCollisionMap(): CollisionMap | null {
+    if (!this.mapGrid) return null;
+    const blocked: number[] = [];
+    for (let y = 0; y < this.mapGrid.height; y++) {
+      for (let x = 0; x < this.mapGrid.width; x++) {
+        blocked.push(this.mapGrid.isBlockedForFootprint([x], y) ? 1 : 0);
+      }
+    }
+    return { width: this.mapGrid.width, height: this.mapGrid.height, blocked };
   }
 
   private setAgentsIdleAtCurrentPosition(): void {

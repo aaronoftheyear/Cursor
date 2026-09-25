@@ -22,7 +22,7 @@ Output format (144x32 strip, 16x32 per frame):
 
 Column mapping (default: idle=0, walk1=1, walk2=3):
   - Most sprites have idle in column 0
-  - Grok's art has idle in column 2 (use --idle-col 2)
+  - Use --idle-col N if source art has idle in a different column
 
 Usage:
   python3 scripts/convert-sprite-sheet.py <input.png> <output.png> [options]
@@ -34,8 +34,8 @@ Examples:
   # Metabee: use legacy order (idle in frame 0)
   python3 scripts/convert-sprite-sheet.py originals/metabee.png sprites/metabee.png --metabee-order
   
-  # Grok: idle in column 2 of source
-  python3 scripts/convert-sprite-sheet.py originals/grok-v2.png sprites/grok.png --idle-col 2
+  # Sprite with idle in a different column (e.g., column 2)
+  python3 scripts/convert-sprite-sheet.py originals/example.png sprites/example.png --idle-col 2
 """
 
 import sys
@@ -212,7 +212,7 @@ def main():
     parser.add_argument('input', help='Input sprite sheet (93x87 PNG)')
     parser.add_argument('output', help='Output strip (144x32 PNG)')
     parser.add_argument('--idle-col', type=int, default=0, choices=[0, 1, 2, 3],
-                        help='Column index of idle frame (default: 0). Use 2 for Grok.')
+                        help='Column index of idle frame in source art (default: 0)')
     parser.add_argument('--side-facing', choices=['left', 'right'], default='left',
                         help='Direction the side row faces (default: left)')
     parser.add_argument('--metabee-order', action='store_true',
