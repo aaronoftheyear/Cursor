@@ -538,243 +538,299 @@ test('set-agent-status.sh: all activity types still valid', () => {
 // Cleanup
 cleanupTempDir();
 
-// Test vite merge logic (exported for testing)
-console.log('\n--- Vite Merge Logic Tests ---\n');
+// Test vite merge logic using the REAL module with fetch mocked
+console.log('\n--- Vite Merge Logic Tests (real module) ---\n');
 
-// Simulate the merge logic for testing
-function simulateMergeExternalAgents(live, external, cloudAgentByIdCache) {
-  const EXTERNAL_STALE_MS = 120_000;
-  const now = Date.now();
-  const merged = { ...live, agents: { ...live.agents } };
-
-  for (const [agentId, extStatus] of Object.entries(external.agents || {})) {
-    if (!extStatus.updatedAt) continue;
-
-    let isStale = false;
-    if (extStatus.expiresAt) {
-      const expiresAt = new Date(extStatus.expiresAt).getTime();
-      isStale = now > expiresAt;
-    } else {
-      const updatedAt = new Date(extStatus.updatedAt).getTime();
-      isStale = now - updatedAt > EXTERNAL_STALE_MS;
+// We need to run these tests async since the real module is async
+async function runMergeLogicTests() {
+  // Dynamic import of the compiled TypeScript module
+  // Use tsx to run the TypeScript directly
+  const { execSync } = require('child_process');
+  
+  // Create a test runner script that imports and tests the real module
+  const testScript = `
+    import { mergeExternalAgents, checkWaitingOnFinished, clearFailedBcIdCache } from '${PROJECT_ROOT}/server/liveStatusMerge.ts';
+    
+    // Mock fetch function for testing
+    function createMockFetch(responses) {
+      return async (url) => {
+        const response = responses[url];
+        if (!response) {
+          return { ok: false, status: 404 };
+        }
+        return {
+          ok: true,
+          json: async () => response,
+        };
+      };
     }
-
-    let waitingOnFinished = false;
-    if (extStatus.waitingOn && !isStale) {
-      const waitingOnId = extStatus.waitingOn;
-      const waitingOnLower = waitingOnId.toLowerCase().trim();
-      
-      if (waitingOnId.startsWith('bc-')) {
-        const cloudAgent = cloudAgentByIdCache.get(waitingOnId);
-        if (cloudAgent && cloudAgent.status === 'idle') {
-          waitingOnFinished = true;
-        }
-      }
-      
-      if (!waitingOnFinished) {
-        for (const [, cloudAgent] of cloudAgentByIdCache) {
-          if (cloudAgent.cloudAgentId === waitingOnId) {
-            if (cloudAgent.status === 'idle') {
-              waitingOnFinished = true;
-            }
-            break;
-          }
-        }
-      }
-      
-      if (!waitingOnFinished && waitingOnLower) {
-        for (const [, cloudAgent] of cloudAgentByIdCache) {
-          const agentName = cloudAgent.cloudAgentName?.toLowerCase().trim();
-          if (!agentName) continue;
-          if (agentName === waitingOnLower) {
-            if (cloudAgent.status === 'idle') {
-              waitingOnFinished = true;
-              break;
-            }
-          }
-        }
+    
+    const results = [];
+    
+    async function test(name, fn) {
+      try {
+        await fn();
+        results.push({ name, passed: true });
+      } catch (err) {
+        results.push({ name, passed: false, error: err.message });
       }
     }
-
-    if (isStale || waitingOnFinished) {
-      merged.agents[agentId] = {
+    
+    function assertEqual(actual, expected, msg = '') {
+      if (actual !== expected) {
+        throw new Error(\`Expected \${JSON.stringify(expected)}, got \${JSON.stringify(actual)}. \${msg}\`);
+      }
+    }
+    
+    function assertTrue(value, msg = '') {
+      if (!value) {
+        throw new Error(\`Expected truthy value, got \${JSON.stringify(value)}. \${msg}\`);
+      }
+    }
+    
+    // Clear cache before tests
+    clearFailedBcIdCache();
+    
+    await test('TTL expiry sets agent to idle', async () => {
+      const live = { agents: {} };
+      const external = {
+        agents: {
+          metabee: {
+            status: 'working',
+            activity: 'waiting',
+            updatedAt: new Date(Date.now() - 200_000).toISOString(),
+            detail: 'Waiting on something',
+          }
+        }
+      };
+      const cloudCache = new Map();
+      const mockFetch = createMockFetch({});
+      
+      const result = await mergeExternalAgents(live, external, undefined, cloudCache, mockFetch);
+      assertEqual(result.agents.metabee?.status, 'idle', 'Expired agent should be idle');
+      assertTrue(result.agents.metabee?.detail?.includes('expired'), 'Should mention expired');
+    });
+    
+    await test('Custom TTL expiresAt respected', async () => {
+      const live = { agents: {} };
+      const external = {
+        agents: {
+          metabee: {
+            status: 'working',
+            activity: 'waiting',
+            updatedAt: new Date(Date.now() - 10_000).toISOString(),
+            expiresAt: new Date(Date.now() - 1000).toISOString(),
+            detail: 'Waiting',
+          }
+        }
+      };
+      const cloudCache = new Map();
+      const mockFetch = createMockFetch({});
+      
+      const result = await mergeExternalAgents(live, external, undefined, cloudCache, mockFetch);
+      assertEqual(result.agents.metabee?.status, 'idle', 'Should be idle when expiresAt passed');
+    });
+    
+    await test('Custom TTL not expired keeps agent working', async () => {
+      const live = { agents: {} };
+      const external = {
+        agents: {
+          metabee: {
+            status: 'working',
+            activity: 'thinking',
+            updatedAt: new Date(Date.now() - 200_000).toISOString(),
+            expiresAt: new Date(Date.now() + 60_000).toISOString(),
+            detail: 'Thinking hard',
+          }
+        }
+      };
+      const cloudCache = new Map();
+      const mockFetch = createMockFetch({});
+      
+      const result = await mergeExternalAgents(live, external, undefined, cloudCache, mockFetch);
+      assertEqual(result.agents.metabee?.status, 'working', 'Should stay working until expiresAt');
+    });
+    
+    await test('Empty cloud agent name does not match waiting-on', async () => {
+      const live = { agents: {} };
+      const external = {
+        agents: {
+          metabee: {
+            status: 'working',
+            activity: 'waiting',
+            waitingOn: 'friday-agent',
+            updatedAt: new Date().toISOString(),
+            expiresAt: new Date(Date.now() + 3600_000).toISOString(),
+          }
+        }
+      };
+      
+      const cloudCache = new Map();
+      cloudCache.set('bc-empty', {
         status: 'idle',
-        detail: waitingOnFinished 
-          ? `Cloud agent finished: ${extStatus.waitingOn}`
-          : 'External agent idle (expired)',
-        source: 'external',
+        cloudAgentId: 'bc-empty',
+        cloudAgentName: '',
+      });
+      const mockFetch = createMockFetch({});
+      
+      const result = await mergeExternalAgents(live, external, undefined, cloudCache, mockFetch);
+      assertEqual(result.agents.metabee?.status, 'working', 'Empty name should not match');
+    });
+    
+    await test('bc-id direct match clears waiting-on', async () => {
+      const live = { agents: {} };
+      const external = {
+        agents: {
+          metabee: {
+            status: 'working',
+            activity: 'waiting',
+            waitingOn: 'bc-test-123',
+            updatedAt: new Date().toISOString(),
+            expiresAt: new Date(Date.now() + 3600_000).toISOString(),
+          }
+        }
       };
-    } else {
-      const entry = {
-        status: extStatus.status,
-        source: 'external',
+      
+      const cloudCache = new Map();
+      cloudCache.set('bc-test-123', {
+        status: 'idle',
+        cloudAgentId: 'bc-test-123',
+        cloudAgentName: 'Test Agent',
+      });
+      const mockFetch = createMockFetch({});
+      
+      const result = await mergeExternalAgents(live, external, undefined, cloudCache, mockFetch);
+      assertEqual(result.agents.metabee?.status, 'idle', 'Should be idle when bc-id match is idle');
+      assertTrue(result.agents.metabee?.detail?.includes('finished'), 'Should mention finished');
+    });
+    
+    await test('Name match clears waiting-on (case insensitive)', async () => {
+      const live = { agents: {} };
+      const external = {
+        agents: {
+          metabee: {
+            status: 'working',
+            activity: 'waiting',
+            waitingOn: 'FRIDAY Agent',
+            updatedAt: new Date().toISOString(),
+            expiresAt: new Date(Date.now() + 3600_000).toISOString(),
+          }
+        }
       };
-      if (extStatus.detail) entry.detail = extStatus.detail;
-      if (extStatus.activity) entry.activity = extStatus.activity;
-      merged.agents[agentId] = entry;
+      
+      const cloudCache = new Map();
+      cloudCache.set('bc-friday', {
+        status: 'idle',
+        cloudAgentId: 'bc-friday',
+        cloudAgentName: 'friday agent',
+      });
+      const mockFetch = createMockFetch({});
+      
+      const result = await mergeExternalAgents(live, external, undefined, cloudCache, mockFetch);
+      assertEqual(result.agents.metabee?.status, 'idle', 'Case-insensitive name match should clear');
+    });
+    
+    await test('Running cloud agent does not clear waiting-on', async () => {
+      const live = { agents: {} };
+      const external = {
+        agents: {
+          metabee: {
+            status: 'working',
+            activity: 'waiting',
+            waitingOn: 'bc-running',
+            updatedAt: new Date().toISOString(),
+            expiresAt: new Date(Date.now() + 3600_000).toISOString(),
+          }
+        }
+      };
+      
+      const cloudCache = new Map();
+      cloudCache.set('bc-running', {
+        status: 'working',
+        cloudAgentId: 'bc-running',
+        cloudAgentName: 'Running Agent',
+      });
+      const mockFetch = createMockFetch({});
+      
+      const result = await mergeExternalAgents(live, external, undefined, cloudCache, mockFetch);
+      assertEqual(result.agents.metabee?.status, 'working', 'Should stay working while waited-on agent is running');
+    });
+    
+    await test('bc-id fetch works when not in cache', async () => {
+      clearFailedBcIdCache();
+      const live = { agents: {} };
+      const external = {
+        agents: {
+          metabee: {
+            status: 'working',
+            activity: 'waiting',
+            waitingOn: 'bc-fetched-123',
+            updatedAt: new Date().toISOString(),
+            expiresAt: new Date(Date.now() + 3600_000).toISOString(),
+          }
+        }
+      };
+      
+      const cloudCache = new Map(); // Empty - will need to fetch
+      const mockFetch = createMockFetch({
+        'https://api.cursor.com/v1/agents/bc-fetched-123': {
+          id: 'bc-fetched-123',
+          name: 'Fetched Agent',
+          latestRunId: 'run-1',
+        },
+        'https://api.cursor.com/v1/agents/bc-fetched-123/runs/run-1': {
+          status: 'FINISHED',
+          result: 'Done',
+        },
+      });
+      
+      const result = await mergeExternalAgents(live, external, 'test-api-key', cloudCache, mockFetch);
+      assertEqual(result.agents.metabee?.status, 'idle', 'Should be idle after fetching finished agent');
+    });
+    
+    console.log(JSON.stringify(results));
+  `;
+  
+  const testScriptPath = path.join(os.tmpdir(), 'merge-test-' + Date.now() + '.mts');
+  fs.writeFileSync(testScriptPath, testScript);
+  
+  try {
+    const output = execSync(`npx tsx ${testScriptPath}`, {
+      encoding: 'utf-8',
+      cwd: PROJECT_ROOT,
+      timeout: 30000,
+    });
+    
+    const results = JSON.parse(output.trim());
+    for (const result of results) {
+      if (result.passed) {
+        console.log(`✓ ${result.name}`);
+        passed++;
+      } else {
+        console.log(`✗ ${result.name}`);
+        console.log(`  Error: ${result.error}`);
+        failed++;
+      }
     }
+  } catch (err) {
+    console.log('✗ Merge logic tests failed to run');
+    console.log(`  Error: ${err.message}`);
+    if (err.stdout) console.log(`  stdout: ${err.stdout}`);
+    if (err.stderr) console.log(`  stderr: ${err.stderr}`);
+    failed++;
+  } finally {
+    try { fs.unlinkSync(testScriptPath); } catch {}
   }
-
-  return merged;
 }
 
-test('Merge logic: TTL expiry sets agent to idle', () => {
-  const live = { agents: {} };
-  const external = {
-    agents: {
-      metabee: {
-        status: 'working',
-        activity: 'waiting',
-        updatedAt: new Date(Date.now() - 200_000).toISOString(), // 200s ago (> 120s default)
-        detail: 'Waiting on something',
-      }
-    }
-  };
-  const cloudCache = new Map();
-  
-  const result = simulateMergeExternalAgents(live, external, cloudCache);
-  assertEqual(result.agents.metabee?.status, 'idle', 'Expired agent should be idle');
-  assertTrue(result.agents.metabee?.detail?.includes('expired'), 'Should mention expired');
-});
-
-test('Merge logic: Custom TTL expiresAt respected', () => {
-  const live = { agents: {} };
-  const external = {
-    agents: {
-      metabee: {
-        status: 'working',
-        activity: 'waiting',
-        updatedAt: new Date(Date.now() - 10_000).toISOString(), // 10s ago
-        expiresAt: new Date(Date.now() - 1000).toISOString(), // expired 1s ago
-        detail: 'Waiting',
-      }
-    }
-  };
-  const cloudCache = new Map();
-  
-  const result = simulateMergeExternalAgents(live, external, cloudCache);
-  assertEqual(result.agents.metabee?.status, 'idle', 'Should be idle when expiresAt passed');
-});
-
-test('Merge logic: Custom TTL not expired keeps agent working', () => {
-  const live = { agents: {} };
-  const external = {
-    agents: {
-      metabee: {
-        status: 'working',
-        activity: 'thinking',
-        updatedAt: new Date(Date.now() - 200_000).toISOString(), // 200s ago
-        expiresAt: new Date(Date.now() + 60_000).toISOString(), // expires in 60s
-        detail: 'Thinking hard',
-      }
-    }
-  };
-  const cloudCache = new Map();
-  
-  const result = simulateMergeExternalAgents(live, external, cloudCache);
-  assertEqual(result.agents.metabee?.status, 'working', 'Should stay working until expiresAt');
-});
-
-test('Merge logic: Empty cloud agent name does not match waiting-on', () => {
-  const live = { agents: {} };
-  const external = {
-    agents: {
-      metabee: {
-        status: 'working',
-        activity: 'waiting',
-        waitingOn: 'friday-agent',
-        updatedAt: new Date().toISOString(),
-        expiresAt: new Date(Date.now() + 3600_000).toISOString(),
-      }
-    }
-  };
-  
-  // Cloud cache has an agent with empty name that is idle
-  const cloudCache = new Map();
-  cloudCache.set('bc-empty', {
-    status: 'idle',
-    cloudAgentId: 'bc-empty',
-    cloudAgentName: '', // Empty name - should not match
-  });
-  
-  const result = simulateMergeExternalAgents(live, external, cloudCache);
-  assertEqual(result.agents.metabee?.status, 'working', 'Empty name should not match, agent stays working');
-});
-
-test('Merge logic: bc-id direct match clears waiting-on', () => {
-  const live = { agents: {} };
-  const external = {
-    agents: {
-      metabee: {
-        status: 'working',
-        activity: 'waiting',
-        waitingOn: 'bc-test-123',
-        updatedAt: new Date().toISOString(),
-        expiresAt: new Date(Date.now() + 3600_000).toISOString(),
-      }
-    }
-  };
-  
-  const cloudCache = new Map();
-  cloudCache.set('bc-test-123', {
-    status: 'idle',
-    cloudAgentId: 'bc-test-123',
-    cloudAgentName: 'Test Agent',
-  });
-  
-  const result = simulateMergeExternalAgents(live, external, cloudCache);
-  assertEqual(result.agents.metabee?.status, 'idle', 'Should be idle when bc-id match is idle');
-  assertTrue(result.agents.metabee?.detail?.includes('finished'), 'Should mention finished');
-});
-
-test('Merge logic: Name match clears waiting-on (case insensitive)', () => {
-  const live = { agents: {} };
-  const external = {
-    agents: {
-      metabee: {
-        status: 'working',
-        activity: 'waiting',
-        waitingOn: 'FRIDAY Agent',
-        updatedAt: new Date().toISOString(),
-        expiresAt: new Date(Date.now() + 3600_000).toISOString(),
-      }
-    }
-  };
-  
-  const cloudCache = new Map();
-  cloudCache.set('bc-friday', {
-    status: 'idle',
-    cloudAgentId: 'bc-friday',
-    cloudAgentName: 'friday agent', // lowercase
-  });
-  
-  const result = simulateMergeExternalAgents(live, external, cloudCache);
-  assertEqual(result.agents.metabee?.status, 'idle', 'Case-insensitive name match should clear');
-});
-
-test('Merge logic: Running cloud agent does not clear waiting-on', () => {
-  const live = { agents: {} };
-  const external = {
-    agents: {
-      metabee: {
-        status: 'working',
-        activity: 'waiting',
-        waitingOn: 'bc-running',
-        updatedAt: new Date().toISOString(),
-        expiresAt: new Date(Date.now() + 3600_000).toISOString(),
-      }
-    }
-  };
-  
-  const cloudCache = new Map();
-  cloudCache.set('bc-running', {
-    status: 'working', // Still running
-    cloudAgentId: 'bc-running',
-    cloudAgentName: 'Running Agent',
-  });
-  
-  const result = simulateMergeExternalAgents(live, external, cloudCache);
-  assertEqual(result.agents.metabee?.status, 'working', 'Should stay working while waited-on agent is running');
+// Run the async merge logic tests
+runMergeLogicTests().then(() => {
+  // Summary
+  console.log(`\n=== Results: ${passed} passed, ${failed} failed ===\n`);
+  process.exit(failed > 0 ? 1 : 0);
+}).catch(err => {
+  console.error('Test runner error:', err);
+  process.exit(1);
 });
 
 // Summary

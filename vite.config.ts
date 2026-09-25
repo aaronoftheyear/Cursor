@@ -2,39 +2,17 @@ import fs from 'node:fs'
 import path from 'node:path'
 import type { Connect } from 'vite'
 import { defineConfig, loadEnv } from 'vite'
+import {
+  mergeExternalAgents,
+  fetchCloudAgentById,
+  type AgentStatus,
+  type LiveStatus,
+  type ExternalAgents,
+  type CloudAgentStatus,
+} from './server/liveStatusMerge'
 
-const EXTERNAL_STALE_MS = 120_000 // 2 minutes
 const CURSOR_STALE_MS = 300_000 // 5 minutes - self-healing for stuck agents
 const DEFAULT_AGENTS = ['jarvis', 'friday', 'bumblebee', 'claude-code'] as const
-
-interface AgentStatus {
-  status: string
-  detail?: string | null
-  source?: string
-  updatedAt?: string
-  activity?: string
-  activityDepth?: 'brief' | 'deep'
-}
-
-interface LiveStatus {
-  updatedAt?: string
-  activeSessions?: number
-  activeTerminals?: number
-  agentSessions?: Record<string, number>
-  lastEventAt?: Record<string, number>
-  agents: Record<string, AgentStatus>
-}
-
-interface ExternalAgentStatus extends AgentStatus {
-  updatedAt?: string
-  ttlSeconds?: number
-  expiresAt?: string
-  waitingOn?: string
-}
-
-interface ExternalAgents {
-  agents: Record<string, ExternalAgentStatus>
-}
 
 interface AgentLinksConfig {
   version: number
@@ -50,17 +28,6 @@ interface AgentLinksConfig {
   }>
 }
 
-interface CloudAgentStatus {
-  status: 'idle' | 'working' | 'busy'
-  detail?: string
-  activity?: string
-  activityDepth?: 'brief' | 'deep'
-  source: 'cloud-api'
-  cloudAgentId?: string
-  cloudAgentName?: string
-  cloudRunStatus?: string
-}
-
 // Cloud agent poller state
 let cloudAgentCache: Map<string, CloudAgentStatus> = new Map()
 // Separate cache for all cloud agents by bc-id (for waiting-on checks)
@@ -70,6 +37,7 @@ const CLOUD_POLL_INTERVAL_MS = 30_000
 
 // Track last sent response for updatedAt comparison
 let lastSentAgents: Record<string, AgentStatus> = {}
+let lastSentUpdatedAt: string | null = null
 
 function readJsonSafe<T>(filePath: string, fallback: T): T {
   try {
@@ -125,161 +93,6 @@ function healStaleAgents(live: LiveStatus): LiveStatus {
   }
 
   return healed
-}
-
-async function checkWaitingOnFinished(
-  waitingOnId: string,
-  apiKey: string | undefined
-): Promise<boolean> {
-  const waitingOnLower = waitingOnId.toLowerCase().trim()
-  
-  // First check if it's a direct bc-ID reference
-  if (waitingOnId.startsWith('bc-')) {
-    // Check cache first
-    let cloudAgent = cloudAgentByIdCache.get(waitingOnId)
-    
-    // If not in cache, fetch directly (for agents beyond first 50 or archived)
-    if (!cloudAgent && apiKey) {
-      cloudAgent = await fetchCloudAgentById(waitingOnId, apiKey) ?? undefined
-      if (cloudAgent) {
-        cloudAgentByIdCache.set(waitingOnId, cloudAgent)
-      }
-    }
-    
-    if (cloudAgent && cloudAgent.status === 'idle') {
-      return true
-    }
-  }
-  
-  // Check by exact cloud agent ID match in the cache
-  for (const [, cloudAgent] of cloudAgentByIdCache) {
-    if (cloudAgent.cloudAgentId === waitingOnId) {
-      if (cloudAgent.status === 'idle') {
-        return true
-      }
-      return false
-    }
-  }
-  
-  // Check by name match - must be non-empty and case-insensitive exact match
-  if (waitingOnLower) {
-    for (const [, cloudAgent] of cloudAgentByIdCache) {
-      const agentName = cloudAgent.cloudAgentName?.toLowerCase().trim()
-      // Skip empty names - they should never match
-      if (!agentName) continue
-      // Case-insensitive exact match only
-      if (agentName === waitingOnLower) {
-        if (cloudAgent.status === 'idle') {
-          return true
-        }
-        // Found matching agent but it's still running - don't clear
-        return false
-      }
-    }
-  }
-  
-  return false
-}
-
-async function mergeExternalAgents(
-  live: LiveStatus,
-  external: ExternalAgents,
-  apiKey: string | undefined
-): Promise<LiveStatus> {
-  const now = Date.now()
-  const merged = { ...live, agents: { ...live.agents } }
-
-  for (const [agentId, extStatus] of Object.entries(external.agents || {})) {
-    if (!extStatus.updatedAt) continue
-
-    // Check if status has expired using custom TTL (expiresAt) or default
-    let isStale = false
-    if (extStatus.expiresAt) {
-      const expiresAt = new Date(extStatus.expiresAt).getTime()
-      isStale = now > expiresAt
-    } else {
-      const updatedAt = new Date(extStatus.updatedAt).getTime()
-      isStale = now - updatedAt > EXTERNAL_STALE_MS
-    }
-
-    // Check if waiting-on cloud agent has finished
-    let waitingOnFinished = false
-    if (extStatus.waitingOn && !isStale) {
-      waitingOnFinished = await checkWaitingOnFinished(extStatus.waitingOn, apiKey)
-    }
-
-    if (isStale || waitingOnFinished) {
-      merged.agents[agentId] = {
-        status: 'idle',
-        detail: waitingOnFinished 
-          ? `Cloud agent finished: ${extStatus.waitingOn}`
-          : 'External agent idle (expired)',
-        source: 'external',
-      }
-    } else {
-      const entry: AgentStatus = {
-        status: extStatus.status,
-        source: 'external',
-      }
-      if (extStatus.detail) entry.detail = extStatus.detail
-      if (extStatus.activity) entry.activity = extStatus.activity
-      if (extStatus.activityDepth) entry.activityDepth = extStatus.activityDepth
-      merged.agents[agentId] = entry
-    }
-  }
-
-  return merged
-}
-
-async function fetchCloudAgentById(agentId: string, apiKey: string): Promise<CloudAgentStatus | null> {
-  try {
-    const res = await fetch(`https://api.cursor.com/v1/agents/${agentId}`, {
-      method: 'GET',
-      headers: {
-        Authorization: `Bearer ${apiKey}`,
-        'Content-Type': 'application/json',
-      },
-    })
-    if (!res.ok) return null
-
-    const agent = await res.json() as { id: string; name?: string; latestRunId?: string }
-    let runStatus: 'idle' | 'working' = 'idle'
-    let detail = 'Cloud agent idle'
-
-    if (agent.latestRunId) {
-      const runRes = await fetch(
-        `https://api.cursor.com/v1/agents/${agent.id}/runs/${agent.latestRunId}`,
-        {
-          method: 'GET',
-          headers: {
-            Authorization: `Bearer ${apiKey}`,
-            'Content-Type': 'application/json',
-          },
-        }
-      )
-      if (runRes.ok) {
-        const run = await runRes.json() as { status: string; result?: string }
-        if (run.status === 'RUNNING' || run.status === 'CREATING') {
-          runStatus = 'working'
-          detail = run.status === 'CREATING' ? 'Starting cloud agent...' : 'Cloud agent running'
-        } else if (run.status === 'FINISHED') {
-          detail = run.result ? `Finished: ${run.result.slice(0, 40)}` : 'Finished'
-        } else {
-          detail = `Run ${run.status.toLowerCase()}`
-        }
-      }
-    }
-
-    return {
-      status: runStatus,
-      detail,
-      source: 'cloud-api',
-      cloudAgentId: agent.id,
-      cloudAgentName: agent.name || '',
-    }
-  } catch {
-    return null
-  }
 }
 
 async function pollCloudAgentsApi(config: AgentLinksConfig, apiKey: string | undefined): Promise<Map<string, CloudAgentStatus>> {
@@ -454,7 +267,7 @@ function createLiveStatusMiddleware(cursorApiKey: string | undefined) {
     const cloudStatus = await pollCloudAgentsApi(linksConfig, cursorApiKey)
 
     // Merge external agents with cloud status for waiting-on auto-clear
-    let merged = await mergeExternalAgents(live, external, cursorApiKey)
+    let merged = await mergeExternalAgents(live, external, cursorApiKey, cloudAgentByIdCache)
 
     // Finally merge cloud agent status
     merged = mergeCloudAgents(merged, cloudStatus)
@@ -463,8 +276,13 @@ function createLiveStatusMiddleware(cursorApiKey: string | undefined) {
     if (agentsChanged(lastSentAgents, merged.agents)) {
       merged.updatedAt = new Date().toISOString()
       lastSentAgents = { ...merged.agents }
-    } else if (!merged.updatedAt) {
-      merged.updatedAt = new Date().toISOString()
+      lastSentUpdatedAt = merged.updatedAt
+    } else {
+      // Re-send last sent timestamp (or initialize if first request)
+      merged.updatedAt = lastSentUpdatedAt || new Date().toISOString()
+      if (!lastSentUpdatedAt) {
+        lastSentUpdatedAt = merged.updatedAt
+      }
     }
 
     res.statusCode = 200
