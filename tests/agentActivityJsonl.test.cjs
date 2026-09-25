@@ -1,7 +1,4 @@
 #!/usr/bin/env node
-/**
- * Unit tests for Claude session JSONL parsing (fixture data only).
- */
 
 const fs = require('fs');
 const path = require('path');
@@ -26,49 +23,56 @@ function test(name, fn) {
   }
 }
 
-function assertEqual(actual, expected, msg = '') {
-  if (actual !== expected) {
-    throw new Error(`Expected ${JSON.stringify(expected)}, got ${JSON.stringify(actual)}. ${msg}`);
-  }
-}
-
 const script = `
   import { parseClaudeJsonlLine, sessionIdFromJsonlPath } from '${PROJECT_ROOT}/server/agentActivity/claudeJsonlParser.ts';
   import fs from 'node:fs';
 
+  const state = { sessionStarted: false, hadToolsInTurn: false };
   const fixture = '${FIXTURE.replace(/'/g, "\\'")}';
-  const sessionId = sessionIdFromJsonlPath('/home/user/.claude/projects/demo-workspace/abc-123.jsonl');
-  if (sessionId !== 'abc-123') throw new Error('session id from path');
+  const parent = sessionIdFromJsonlPath('/proj/demo-uuid/subagents/agent-a1b2.jsonl');
+  if (parent !== 'demo-uuid') throw new Error('subagent parent session');
 
   const lines = fs.readFileSync(fixture, 'utf-8').trim().split('\\n');
   const all = [];
-  lines.forEach((line, i) => {
-    all.push(...parseClaudeJsonlLine(line, { sessionId: 'fixture-session-001', filePath: fixture, lineIndex: i }));
-  });
+  let offset = 0;
+  for (const line of lines) {
+    const byteOffset = offset;
+    offset += Buffer.byteLength(line, 'utf-8') + 1;
+    const { events } = parseClaudeJsonlLine(line, {
+      sessionId: 'demo-uuid',
+      filePath: fixture,
+      byteOffset,
+    }, state);
+    all.push(...events);
+  }
+
+  const ids = all.map(e => e.id);
+  const unique = new Set(ids);
+  if (ids.length !== unique.size) throw new Error('duplicate event ids');
 
   const kinds = all.map(e => e.kind + ':' + (e.activity || ''));
-  console.log(JSON.stringify({ count: all.length, kinds, first: all[0]?.kind }));
+  const hasTurnEnd = kinds.some(k => k.startsWith('turnEnd'));
+  const toolResultOnly = parseClaudeJsonlLine(lines[3], { sessionId:'s', filePath:'f', byteOffset:99 }, state);
+  if (toolResultOnly.events.length !== 0) throw new Error('tool_result should not emit');
+
+  const thinking = all.find(e => e.activity === 'thinking');
+  if (!thinking) throw new Error('missing thinking');
+
+  console.log(JSON.stringify({ count: all.length, hasTurnEnd, thinkingId: thinking.id }));
 `;
 
-const out = execFileSync(tsxBin, ['-e', script], { encoding: 'utf-8', cwd: PROJECT_ROOT });
-const result = JSON.parse(out.trim());
+const result = JSON.parse(execFileSync(tsxBin, ['-e', script], { encoding: 'utf-8', cwd: PROJECT_ROOT }).trim());
 
-test('fixture jsonl parses without error', () => {
-  assertEqual(typeof result.count, 'number');
-  assertEqual(result.count >= 6, true);
+test('real-format fixture parses', () => {
+  if (result.count < 4) throw new Error('too few events');
 });
 
-test('sessionStart from system init', () => {
-  assertEqual(result.first, 'sessionStart');
+test('turn_duration emits turnEnd', () => {
+  if (!result.hasTurnEnd) throw new Error('no turnEnd');
 });
 
-test('fixture contains reading/editing/running/github/researching', () => {
-  const blob = result.kinds.join(',');
-  assertEqual(blob.includes('activity:reading'), true);
-  assertEqual(blob.includes('activity:editing'), true);
-  assertEqual(blob.includes('activity:running'), true);
-  assertEqual(blob.includes('activity:github'), true);
-  assertEqual(blob.includes('activity:researching'), true);
+test('thinking uses thinking activity with stable uuid id', () => {
+  if (!result.thinkingId.includes('11111111')) throw new Error('expected uuid in id');
 });
 
 console.log(`\n=== JSONL parser: ${passed} passed, ${failed} failed ===\n`);

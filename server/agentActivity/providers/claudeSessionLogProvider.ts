@@ -1,39 +1,55 @@
 /**
- * Claude session JSONL fallback — tails ~/.claude/projects (recursive .jsonl)
- * (pixel-agents fileWatcher tail-only pattern, MIT).
+ * Claude session JSONL fallback — tails ~/.claude/projects (pixel-agents, MIT).
  */
 
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import { parseClaudeJsonlLine, sessionIdFromJsonlPath } from '../claudeJsonlParser'
+import {
+  type ClaudeJsonlSessionState,
+  parseClaudeJsonlLine,
+  sessionIdFromJsonlPath,
+} from '../claudeJsonlParser'
 import type { AgentActivityProvider, AgentEvent } from '../types'
 
 const POLL_MS = 500
-const STARTUP_TAIL_BYTES = 64 * 1024
+const RECENT_FILE_MS = 120_000
+const PERMISSION_TIMER_MS = 7_000
 
 export interface ClaudeSessionLogOptions {
   projectsRoot?: string
   offsetsFile?: string
+  permissionTimerMs?: number
+}
+
+export function defaultOffsetsPath(): string {
+  return path.join(
+    os.homedir(),
+    '.cache',
+    'ai-agent-dashboard',
+    'claude-jsonl-offsets.json'
+  )
 }
 
 export class ClaudeSessionLogProvider implements AgentActivityProvider {
   readonly id = 'claude-session-log'
   private timer: ReturnType<typeof setInterval> | null = null
   private emit: ((e: AgentEvent) => void) | null = null
-  private offsets = new Map<string, number>()
+  private offsets = new Map<string, { offset: number; lastSize: number }>()
+  private partialLines = new Map<string, string>()
+  private sessionState = new Map<string, ClaudeJsonlSessionState>()
+  private permissionTimers = new Map<string, ReturnType<typeof setTimeout>>()
+  private offsetsDirty = false
   private readonly projectsRoot: string
   private readonly offsetsFile: string
+  private readonly permissionTimerMs: number
+  private knownFiles = new Set<string>()
 
-  constructor(
-    projectRoot: string,
-    options: ClaudeSessionLogOptions = {}
-  ) {
+  constructor(_projectRoot: string, options: ClaudeSessionLogOptions = {}) {
     this.projectsRoot =
       options.projectsRoot ?? path.join(os.homedir(), '.claude', 'projects')
-    this.offsetsFile =
-      options.offsetsFile ??
-      path.join(projectRoot, '.dashboard', 'claude-jsonl-offsets.json')
+    this.offsetsFile = options.offsetsFile ?? defaultOffsetsPath()
+    this.permissionTimerMs = options.permissionTimerMs ?? PERMISSION_TIMER_MS
   }
 
   private loadOffsets(): void {
@@ -41,22 +57,32 @@ export class ClaudeSessionLogProvider implements AgentActivityProvider {
       if (!fs.existsSync(this.offsetsFile)) return
       const data = JSON.parse(fs.readFileSync(this.offsetsFile, 'utf-8')) as Record<
         string,
-        number
+        number | { offset: number; lastSize?: number }
       >
       for (const [k, v] of Object.entries(data)) {
-        if (typeof v === 'number') this.offsets.set(k, v)
+        if (typeof v === 'number') this.offsets.set(k, { offset: v, lastSize: v })
+        else if (v && typeof v === 'object' && typeof v.offset === 'number') {
+          this.offsets.set(k, { offset: v.offset, lastSize: v.lastSize ?? v.offset })
+        }
       }
     } catch {
       /* ignore */
     }
   }
 
-  private saveOffsets(): void {
+  private saveOffsetsIfDirty(): void {
+    if (!this.offsetsDirty) return
     const dir = path.dirname(this.offsetsFile)
     fs.mkdirSync(dir, { recursive: true })
-    const obj: Record<string, number> = {}
-    for (const [k, v] of this.offsets) obj[k] = v
-    fs.writeFileSync(this.offsetsFile, JSON.stringify(obj, null, 2) + '\n')
+    const obj: Record<string, { offset: number; lastSize: number }> = {}
+    for (const file of this.knownFiles) {
+      const entry = this.offsets.get(file)
+      if (entry) obj[file] = entry
+    }
+    const tmp = `${this.offsetsFile}.tmp.${process.pid}`
+    fs.writeFileSync(tmp, JSON.stringify(obj, null, 2) + '\n')
+    fs.renameSync(tmp, this.offsetsFile)
+    this.offsetsDirty = false
   }
 
   private listJsonlFiles(): string[] {
@@ -72,37 +98,99 @@ export class ClaudeSessionLogProvider implements AgentActivityProvider {
       for (const ent of entries) {
         const full = path.join(dir, ent.name)
         if (ent.isDirectory()) walk(full)
-        else if (ent.isFile() && ent.name.endsWith('.jsonl')) out.push(full)
+        else if (ent.isFile() && ent.name.endsWith('.jsonl')) {
+          try {
+            const st = fs.statSync(full)
+            const tracked = this.offsets.has(full)
+            if (!tracked && Date.now() - st.mtimeMs > RECENT_FILE_MS) continue
+            out.push(full)
+          } catch {
+            /* skip */
+          }
+        }
       }
     }
     walk(this.projectsRoot)
     return out
   }
 
-  private seedOffset(filePath: string): number {
-    if (this.offsets.has(filePath)) return this.offsets.get(filePath)!
-    try {
-      const stat = fs.statSync(filePath)
-      const start = Math.max(0, stat.size - STARTUP_TAIL_BYTES)
-      this.offsets.set(filePath, start)
-      return start
-    } catch {
-      this.offsets.set(filePath, 0)
-      return 0
+  private initialOffset(filePath: string, stat: fs.Stats): number {
+    if (this.offsets.has(filePath)) return this.offsets.get(filePath)!.offset
+    this.offsets.set(filePath, { offset: stat.size, lastSize: stat.size })
+    this.offsetsDirty = true
+    return stat.size
+  }
+
+  private getSessionState(sessionId: string): ClaudeJsonlSessionState {
+    let s = this.sessionState.get(sessionId)
+    if (!s) {
+      s = { sessionStarted: false, hadToolsInTurn: false }
+      this.sessionState.set(sessionId, s)
     }
+    return s
+  }
+
+  private clearPermissionTimer(sessionId: string): void {
+    const t = this.permissionTimers.get(sessionId)
+    if (t) clearTimeout(t)
+    this.permissionTimers.delete(sessionId)
+  }
+
+  private schedulePermissionTimer(sessionId: string): void {
+    this.clearPermissionTimer(sessionId)
+    const timer = setTimeout(() => {
+      if (!this.emit) return
+      this.emit({
+        id: `${sessionId}:permission:${Date.now()}`,
+        ts: Date.now(),
+        source: 'claude-session-log',
+        providerId: this.id,
+        agentId: 'claude-code',
+        sessionId,
+        kind: 'permission',
+        status: 'working',
+        activity: 'waiting',
+        activityDepth: 'brief',
+        detail: 'Claude Code — waiting for permission',
+      })
+    }, this.permissionTimerMs)
+    this.permissionTimers.set(sessionId, timer)
   }
 
   private tailFile(filePath: string): void {
     if (!this.emit) return
+    this.knownFiles.add(filePath)
     const sessionId = sessionIdFromJsonlPath(filePath)
-    let offset = this.seedOffset(filePath)
+    const state = this.getSessionState(sessionId)
+
     let stat: fs.Stats
     try {
       stat = fs.statSync(filePath)
     } catch {
       return
     }
-    if (stat.size < offset) offset = 0
+
+    const saved = this.offsets.get(filePath)
+    let offset = saved ? saved.offset : this.initialOffset(filePath, stat)
+
+    if (
+      (saved && stat.size < saved.lastSize) ||
+      stat.size < offset ||
+      offset > stat.size
+    ) {
+      offset = 0
+      this.partialLines.delete(filePath)
+    }
+    if (offset > 0 && stat.size > 0) {
+      const probe = Buffer.alloc(1)
+      const pfd = fs.openSync(filePath, 'r')
+      fs.readSync(pfd, probe, 0, 1, offset)
+      fs.closeSync(pfd)
+      if (probe[0] !== 0x7b) {
+        offset = 0
+        this.partialLines.delete(filePath)
+      }
+    }
     if (stat.size <= offset) return
 
     const fd = fs.openSync(filePath, 'r')
@@ -110,28 +198,55 @@ export class ClaudeSessionLogProvider implements AgentActivityProvider {
     const buf = Buffer.alloc(len)
     fs.readSync(fd, buf, 0, len, offset)
     fs.closeSync(fd)
-    this.offsets.set(filePath, stat.size)
 
-    const chunk = buf.toString('utf-8')
-    const lines = chunk.split('\n')
-    let lineIndex = 0
-    for (const line of lines) {
-      if (!line.trim()) continue
-      const events = parseClaudeJsonlLine(line, {
-        sessionId,
-        filePath,
-        lineIndex,
-      })
-      for (const ev of events) this.emit!(ev)
-      lineIndex++
+    const startOffset = offset
+    let chunk = (this.partialLines.get(filePath) || '') + buf.toString('utf-8')
+    this.partialLines.delete(filePath)
+
+    const parts = chunk.split('\n')
+    if (!chunk.endsWith('\n')) {
+      this.partialLines.set(filePath, parts.pop() || '')
     }
+
+    let lineStart = startOffset
+    for (const line of parts) {
+      const lineBytes = Buffer.byteLength(line, 'utf-8') + 1
+      const byteOffset = lineStart
+      lineStart += lineBytes
+
+      const { events, schedulePermissionTimer } = parseClaudeJsonlLine(
+        line,
+        { sessionId, filePath, byteOffset },
+        state
+      )
+
+      if (schedulePermissionTimer) this.schedulePermissionTimer(sessionId)
+      else if (events.some((e) => e.kind === 'turnEnd' || e.kind === 'activity')) {
+        this.clearPermissionTimer(sessionId)
+      }
+
+      for (const ev of events) this.emit!(ev)
+    }
+
+    this.offsets.set(filePath, { offset: stat.size, lastSize: stat.size })
+    this.offsetsDirty = true
   }
 
   private poll(): void {
-    for (const file of this.listJsonlFiles()) {
+    const files = this.listJsonlFiles()
+    const live = new Set(files)
+    for (const f of this.knownFiles) {
+      if (!live.has(f)) {
+        this.knownFiles.delete(f)
+        this.offsets.delete(f)
+        this.partialLines.delete(f)
+        this.offsetsDirty = true
+      }
+    }
+    for (const file of files) {
       this.tailFile(file)
     }
-    this.saveOffsets()
+    this.saveOffsetsIfDirty()
   }
 
   start(emit: (event: AgentEvent) => void): void {
@@ -145,6 +260,8 @@ export class ClaudeSessionLogProvider implements AgentActivityProvider {
     if (this.timer) clearInterval(this.timer)
     this.timer = null
     this.emit = null
-    this.saveOffsets()
+    for (const t of this.permissionTimers.values()) clearTimeout(t)
+    this.permissionTimers.clear()
+    this.saveOffsetsIfDirty()
   }
 }

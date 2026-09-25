@@ -285,10 +285,7 @@ Detection is centralized in `server/agentActivity/`: every source emits the same
 |--------|----------|--------|
 | Claude Code hooks | `claude-hook` | Non-blocking hook → Python status pipeline; hooks win over log fallback |
 | Claude session JSONL | `claude-session-log` | Tails `~/.claude/projects/**/*.jsonl` when hooks are missing |
-| `set-agent-status.sh` | `external-script` | Watches `.dashboard/external-agents.json` |
-| Cursor Cloud API | `cursor-api` | Same polling as `/live-status.json` merge |
-
-The Vite dev server starts the feed automatically and exposes `POST /__agent_activity/claude-hook` for optional hook forwarding. Run the feed standalone with:
+The Vite dev server starts the session-log feed automatically (stops on dev server close). Run the feed standalone with:
 
 ```bash
 node --import tsx scripts/run-activity-feed.mts

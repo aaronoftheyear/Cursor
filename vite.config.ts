@@ -11,7 +11,7 @@ import {
   type ExternalAgents,
   type CloudAgentStatus,
 } from './server/liveStatusMerge'
-import { ActivityFeed, loadAgentNameHints } from './server/agentActivity/activityFeed'
+import { ActivityFeed } from './server/agentActivity/activityFeed'
 
 const CURSOR_STALE_MS = 300_000 // 5 minutes - self-healing for stuck agents
 const DEFAULT_AGENTS = ['jarvis', 'friday', 'bumblebee', 'claude-code'] as const
@@ -296,29 +296,21 @@ export default defineConfig(({ mode }) => {
         name: 'dashboard-live-status',
         configureServer(server) {
           server.middlewares.use('/live-status.json', liveStatusMiddleware)
-          activityFeed = new ActivityFeed({
-            projectRoot: process.cwd(),
-            cursorApiKey,
-            agentNameHints: loadAgentNameHints(process.cwd()),
-          })
+          activityFeed = new ActivityFeed({ projectRoot: process.cwd() })
           activityFeed.start()
-          server.middlewares.use(
-            '/__agent_activity/claude-hook',
-            activityFeed.createHookMiddleware()
-          )
+          return () => {
+            activityFeed?.stop()
+            activityFeed = null
+          }
         },
         configurePreviewServer(server) {
           server.middlewares.use('/live-status.json', liveStatusMiddleware)
-          activityFeed = new ActivityFeed({
-            projectRoot: process.cwd(),
-            cursorApiKey,
-            agentNameHints: loadAgentNameHints(process.cwd()),
-          })
+          activityFeed = new ActivityFeed({ projectRoot: process.cwd() })
           activityFeed.start()
-          server.middlewares.use(
-            '/__agent_activity/claude-hook',
-            activityFeed.createHookMiddleware()
-          )
+          return () => {
+            activityFeed?.stop()
+            activityFeed = null
+          }
         },
       },
     ],

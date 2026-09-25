@@ -1,18 +1,12 @@
-import { ActivityFeed, loadAgentNameHints } from '../server/agentActivity/activityFeed.ts'
-import { loadEnv } from 'vite'
-import path from 'node:path'
+import { ActivityFeed } from '../server/agentActivity/activityFeed.ts'
 import { fileURLToPath } from 'node:url'
+import path from 'node:path'
 
 const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
-const env = loadEnv('development', projectRoot, '')
 
-const feed = new ActivityFeed({
-  projectRoot,
-  cursorApiKey: env.CURSOR_API_KEY || undefined,
-  agentNameHints: loadAgentNameHints(projectRoot),
-})
+const feed = new ActivityFeed({ projectRoot })
 feed.start()
-console.log('[agent-activity-feed] Running (Claude log fallback + external status + Cursor API)')
+console.log('[agent-activity-feed] Running (Claude session-log fallback)')
 
 process.on('SIGINT', () => {
   feed.stop()

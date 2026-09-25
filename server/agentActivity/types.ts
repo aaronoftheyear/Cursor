@@ -1,7 +1,6 @@
 /**
  * Normalized agent activity events for the dashboard feed.
- * Inspired by pixel-agents AgentEvent union (MIT) — adapted to this repo's
- * status/activity vocabulary and multi-agent routing.
+ * Inspired by pixel-agents AgentEvent union (MIT).
  */
 
 export type AgentStatusValue = 'idle' | 'working' | 'busy'
@@ -16,12 +15,7 @@ export type AgentActivityKind =
   | 'github'
   | 'waiting'
 
-export type AgentEventSource =
-  | 'claude-hook'
-  | 'claude-session-log'
-  | 'cursor-api'
-  | 'external-script'
-  | 'codex-session-log'
+export type AgentEventSource = 'claude-hook' | 'claude-session-log'
 
 export type AgentEventKind =
   | 'sessionStart'
@@ -31,17 +25,7 @@ export type AgentEventKind =
   | 'permission'
   | 'idle'
 
-/** Priority: higher wins when two providers emit conflicting state for one session. */
-export const SOURCE_PRIORITY: Record<AgentEventSource, number> = {
-  'claude-hook': 100,
-  'cursor-api': 80,
-  'external-script': 70,
-  'claude-session-log': 40,
-  'codex-session-log': 35,
-}
-
 export interface AgentEvent {
-  /** Stable id for deduplication within the feed */
   id: string
   ts: number
   source: AgentEventSource
@@ -53,9 +37,7 @@ export interface AgentEvent {
   activity?: AgentActivityKind
   activityDepth?: 'brief' | 'deep'
   detail?: string
-  /** Raw hook-style payload for applyViaPython (claude/cursor paths) */
   hookPayload?: Record<string, unknown>
-  /** Cursor hook event name when forwarding to Python */
   cursorEvent?: string
 }
 

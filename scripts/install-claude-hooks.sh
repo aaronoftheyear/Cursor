@@ -222,6 +222,7 @@ PYTHON_CHECK
       version_ok=0
       python3 - "$CLAUDE_SETTINGS" "$HOOK_SCRIPT" "$DASHBOARD_HOOK_VERSION" << 'PYTHON_VERSION' || version_ok=$?
 import json
+import re
 import sys
 
 settings_path = sys.argv[1]
@@ -233,6 +234,9 @@ with open(settings_path) as f:
 
 hooks = data.get("hooks", {})
 found = 0
+references = False
+ver_re = re.compile(r"--dashboard-hook-version=(\d+)")
+
 for event_groups in hooks.values():
     if not isinstance(event_groups, list):
         continue
@@ -242,18 +246,28 @@ for event_groups in hooks.values():
         group_hooks = group.get("hooks", [])
         if not isinstance(group_hooks, list):
             continue
-        if not any(hook_script in h.get("command", "") for h in group_hooks if isinstance(h, dict)):
-            continue
-        ver = group.get("_dashboard_hook_version", 0)
-        if isinstance(ver, int):
-            found = max(found, ver)
+        for hook in group_hooks:
+            if not isinstance(hook, dict):
+                continue
+            cmd = hook.get("command", "")
+            if hook_script not in cmd:
+                continue
+            references = True
+            m = ver_re.search(cmd)
+            if m:
+                found = max(found, int(m.group(1)))
+            else:
+                found = max(found, 1)
 
-if found < required:
+if not references:
     sys.exit(1)
+if found < required:
+    print(f"installed_version={found}", file=sys.stderr)
+    sys.exit(2)
 sys.exit(0)
 PYTHON_VERSION
 
-      if [[ $version_ok -ne 0 ]]; then
+      if [[ $version_ok -eq 2 ]]; then
         echo "✗ Claude Code hooks are installed but outdated (need v$DASHBOARD_HOOK_VERSION)"
         echo "  Re-run: ./scripts/install-claude-hooks.sh"
         exit 1
@@ -306,7 +320,7 @@ hook_events = [
     "SessionEnd",
 ]
 
-hook_command = f'"{node_path}" "{hook_script}"'
+hook_command = f'"{node_path}" "{hook_script}" --dashboard-hook-version={hook_version}'
 
 # Our hook group structure
 our_group = {
@@ -318,7 +332,6 @@ our_group = {
         }
     ],
     "_dashboard_marker": hook_marker,
-    "_dashboard_hook_version": hook_version,
 }
 
 # Claude Code format: "Event": [ {matcher, hooks}, {matcher, hooks}, ... ]
