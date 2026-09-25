@@ -279,8 +279,8 @@ export const assetLoader = new AssetLoader();
  * Metabee uses original order: position 0 = idle.
  * STRIP_COL_IDLE=0 means we always draw from position 0.
  */
-const STRIP_COL_IDLE = 0;
-const STRIP_COL_WALK1 = 1;
+export const STRIP_COL_IDLE = 0;
+export const STRIP_COL_WALK1 = 1;
 const STRIP_COL_WALK2 = 2;
 const STRIP_WALK_COLS = [
   STRIP_COL_WALK1,

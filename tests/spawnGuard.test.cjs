@@ -219,5 +219,14 @@ test('Real map: all walkable tiles pass validation', () => {
   }
 });
 
+test('Real map: tile (5, 22) is never a valid spawn', () => {
+  assert.strictEqual(realBottomRow, 22, 'Bottom row should be 22 for this map');
+  const result = callSpawnGuard('isValidSpawnPosition', collision, { x: 5, y: 22 }, realBottomRow);
+  assert.strictEqual(result.valid, false, 'Tile (5, 22) should not be valid spawn position');
+  // Tile is blocked AND on bottom row - validation correctly rejects it
+  assert.ok(result.reason.includes('blocked') || result.reason.includes('bottom row'),
+    'Reason should indicate why tile is invalid');
+});
+
 console.log(`\n=== Results: ${passed} passed, ${failed} failed ===\n`);
 process.exit(failed > 0 ? 1 : 0);
