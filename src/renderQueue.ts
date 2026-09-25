@@ -1,18 +1,22 @@
 /**
  * Render queue building and sorting for depth-sorted 2.5D rendering.
  *
- * Layer ordering (Tiled layer → render constant):
+ * Layer ordering (Tiled layer → render pass):
  *   grass/floor    → background (baked, not in queue)
- *   furniture-low  → LAYER_WALKOVER - walkable, under avatar
+ *   furniture-low  → PASS 1: walkable, under avatar
  *   walls          → collision only (baked, not in queue)
- *   furniture-mid  → LAYER_MID - collision, depth sorted with avatar
- *   avatar         → LAYER_AGENT - depth sorted
- *   wall-front     → LAYER_WALLS_FRONT - collision, always on top of avatar
- *   furniture-high → overlay (drawn after queue, not in queue)
+ *   shadows        → PASS 2: always under furniture-mid/wall-front
+ *   furniture-mid  → PASS 3: depth sorted with avatar (LAYER_MID)
+ *   avatar         → PASS 3: depth sorted (LAYER_AGENT)
+ *   wall-front     → PASS 4: ALWAYS on top of avatars and shadows
+ *   furniture-high → PASS 5: overlay (drawn after queue, not in queue)
  *
  * Shadows are drawn in a SEPARATE PASS before the depth-sorted queue,
  * so they are ALWAYS under furniture-mid and wall-front regardless of Y.
  * Shadows sit on top of floor/grass/furniture-low only.
+ *
+ * Wall-front is drawn in a SEPARATE PASS after the depth-sorted queue,
+ * so it is ALWAYS on top of avatars and their shadows regardless of Y.
  *
  * Depth sorting: items at lower Y (higher on screen) draw first (behind).
  * At same Y, lower layer order draws first (underneath).

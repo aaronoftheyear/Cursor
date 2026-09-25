@@ -227,13 +227,24 @@ export class GameEngine {
 
   private resolveSpawnFootTile(agentId: string): TileCoord | null {
     const preferred = gameMap.getAgentSpawnTile(agentId);
-    if (!preferred) return null;
     const agent = this.state.agents.find((a) => a.id === agentId);
-    if (!agent) return preferred;
-    if (this.canOccupyTile(preferred.x, preferred.y, agent)) {
-      return preferred;
+    if (!agent) return preferred ?? null;
+    
+    if (preferred) {
+      if (this.canOccupyTile(preferred.x, preferred.y, agent)) {
+        return preferred;
+      }
+      return this.findNearestWalkableFootTile(agent, preferred);
     }
-    return this.findNearestWalkableFootTile(agent, preferred);
+    
+    // No spawn point defined - find any walkable tile (never use random pixels)
+    const walkable = this.getAllWalkableTiles(agent);
+    if (walkable.length > 0) {
+      const idx = Math.floor(Math.random() * walkable.length);
+      const tile = walkable[idx];
+      return tile ?? null;
+    }
+    return null;
   }
 
   private findNearestWalkableFootTile(agent: Agent, preferred: TileCoord): TileCoord | null {
@@ -886,12 +897,16 @@ export class GameEngine {
     //   1. Background (floor/grass/walls) - baked into mapBackground, drawn by clear()
     //   2. Furniture-low (walkover) - walkable tiles drawn under avatar
     //   3. ALL SHADOWS - separate pass, always under furniture-mid/wall-front
-    //   4. Depth-sorted queue: furniture-mid, avatars, wall-front
-    //   5. Overlay (furniture-high) - always on top of avatar
+    //   4. Depth-sorted queue: furniture-mid, avatars
+    //   5. Wall-front - ALWAYS on top of avatars and shadows
+    //   6. Overlay (furniture-high) - always on top of everything
     //
     // Shadow rule: shadows are drawn in their own pass BEFORE the depth-sorted
     // queue, so they are ALWAYS under furniture-mid and wall-front regardless
     // of Y position. Shadows sit on top of floor/grass/furniture-low only.
+    //
+    // Wall-front rule: wall-front tiles are drawn AFTER the depth-sorted queue,
+    // so they are ALWAYS on top of avatars and their shadows.
 
     // Build agent render info with per-agent feet positions
     const agents: AgentRenderInfo[] = [];
@@ -946,14 +961,20 @@ export class GameEngine {
       agent.drawShadow();
     }
 
-    // PASS 3: Depth-sorted queue (furniture-mid, avatars, wall-front)
+    // PASS 3: Depth-sorted queue (furniture-mid, avatars only)
     // Shadows are NOT in this queue, so they're always underneath
-    const queue = buildSortedRenderQueue(agents, [], midTiles, wallsFrontTiles);
+    // Wall-front is drawn in a separate pass to be always on top
+    const queue = buildSortedRenderQueue(agents, [], midTiles, []);
     for (const item of queue) {
       item.draw();
     }
 
-    // PASS 4: Overlay (furniture-high) is always drawn on top of everything
+    // PASS 4: Wall-front tiles - ALWAYS on top of avatars and shadows
+    for (const tile of wallsFrontTiles) {
+      tile.draw();
+    }
+
+    // PASS 5: Overlay (furniture-high) is always drawn on top of everything
     this.renderer.drawMapOverlay(layout);
 
     if (this.state.selectedAgent) {
