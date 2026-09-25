@@ -32,7 +32,7 @@ class AIAgentDashboard {
 
     startLiveStatusSync(this.engine, () => this.updateAgentList());
 
-    if (import.meta.hot) {
+    if (import.meta.env.DEV) {
       (window as unknown as { __aiDashboard?: AIAgentDashboard }).__aiDashboard = this;
       this.applyDebugPinsFromQuery();
     }
