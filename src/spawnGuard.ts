@@ -94,8 +94,7 @@ export function resolveNoSpawnTile(
     candidates = getAllWalkableTiles(map);
   }
   
-  // Filter out bottom row
-  candidates = candidates.filter(t => t.y !== bottomRow);
+  candidates = filterOutBottomRow(candidates, bottomRow);
   
   if (candidates.length === 0) return null;
   
@@ -107,6 +106,32 @@ export function resolveNoSpawnTile(
 /**
  * Validate a spawn position - used for testing.
  */
+/** Exclude map bottom row from spawn candidate tiles. */
+export function filterOutBottomRow(
+  candidates: TileCoord[],
+  bottomRow: number
+): TileCoord[] {
+  return candidates.filter((t) => t.y !== bottomRow);
+}
+
+/**
+ * Engine spawn path when an agent has no preferred spawn tile.
+ * Mirrors GameEngine.resolveSpawnFootTile (collision + fallback walkables).
+ */
+export function pickEngineSpawnFootTile(
+  map: CollisionMap,
+  room: Room | null,
+  walkableFallback: TileCoord[]
+): TileCoord | null {
+  const bottomRow = map.height - 1;
+  const fromResolver = resolveNoSpawnTile(map, room, bottomRow);
+  if (fromResolver) return fromResolver;
+  const filtered = filterOutBottomRow(walkableFallback, bottomRow);
+  if (filtered.length === 0) return null;
+  const idx = Math.floor(Math.random() * filtered.length);
+  return filtered[idx];
+}
+
 export function isValidSpawnPosition(
   map: CollisionMap,
   tile: TileCoord,

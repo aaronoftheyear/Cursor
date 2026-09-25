@@ -41,6 +41,13 @@ class AIAgentDashboard {
   /** ?debugPin=jarvis@10,20&debugHide=1 hides all agents except pinned */
   private applyDebugPinsFromQuery(): void {
     const params = new URLSearchParams(window.location.search);
+    if (params.get('debugNoAgents') === '1') {
+      const hideAll = () => this.engine.setDebugAgentVisibility([]);
+      window.setTimeout(hideAll, 4000);
+      window.setTimeout(hideAll, 8000);
+      return;
+    }
+
     const pin = params.get('debugPin');
     if (!pin) return;
 

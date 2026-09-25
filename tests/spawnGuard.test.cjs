@@ -179,6 +179,72 @@ test('isValidSpawnPosition: accepts valid tiles', () => {
   assert.strictEqual(result.valid, true, 'Should accept valid tile');
 });
 
+console.log('\n--- Walkable bottom row (spawn guard must reject y=bottom) ---\n');
+
+// Bottom row is walkable in collision data — only the bottomRow filter prevents spawning there.
+const walkableBottomMap = {
+  width: 5,
+  height: 4,
+  blocked: [
+    1, 1, 1, 1, 1,
+    1, 0, 0, 0, 1,
+    1, 0, 0, 0, 1,
+    1, 0, 0, 0, 1,
+  ],
+};
+const walkableBottomRow = walkableBottomMap.height - 1;
+
+test('Walkable bottom map: resolveNoSpawnTile never returns bottom row', () => {
+  const room = { x: 0, y: 0, width: 5, height: 4 };
+  for (let i = 0; i < 80; i++) {
+    const tile = callSpawnGuard('resolveNoSpawnTile', walkableBottomMap, room, walkableBottomRow);
+    assert.ok(tile, 'Should return a tile');
+    assert.notStrictEqual(
+      tile.y,
+      walkableBottomRow,
+      `Must not spawn on walkable bottom row (${tile.x}, ${tile.y})`
+    );
+  }
+});
+
+test('Walkable bottom map: pickEngineSpawnFootTile never returns bottom row', () => {
+  const room = { x: 0, y: 0, width: 5, height: 4 };
+  const allWalkable = callSpawnGuard('getAllWalkableTiles', walkableBottomMap);
+  for (let i = 0; i < 80; i++) {
+    const tile = callSpawnGuard(
+      'pickEngineSpawnFootTile',
+      walkableBottomMap,
+      room,
+      allWalkable
+    );
+    assert.ok(tile, 'Should return a tile');
+    assert.notStrictEqual(tile.y, walkableBottomRow, 'Engine spawn path must exclude bottom row');
+  }
+});
+
+test('Walkable bottom map: only bottom row walkable still must not spawn there', () => {
+  const onlyBottomWalkable = {
+    width: 3,
+    height: 3,
+    blocked: [
+      1, 1, 1,
+      1, 1, 1,
+      1, 0, 1,
+    ],
+  };
+  const br = onlyBottomWalkable.height - 1;
+  const fallback = [{ x: 1, y: br }];
+  for (let i = 0; i < 20; i++) {
+    const tile = callSpawnGuard(
+      'pickEngineSpawnFootTile',
+      onlyBottomWalkable,
+      null,
+      fallback
+    );
+    assert.strictEqual(tile, null, 'When only bottom row is walkable, spawn must fail');
+  }
+});
+
 console.log('\n--- Real Collision Map Tests ---\n');
 
 const collisionPath = path.resolve(__dirname, '../public/assets/maps/dashboard-v1-collision.json');
