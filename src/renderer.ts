@@ -310,7 +310,7 @@ export class Renderer {
     this.ctx.fill();
   }
 
-  drawAgent(agent: Agent, isSelected: boolean, isHovered: boolean): void {
+  drawAgent(agent: Agent, isSelected: boolean, _isHovered: boolean): void {
     const size = this.agentDrawSize(agent);
 
     const custom = this.sprites.get(agent.id);
@@ -319,8 +319,6 @@ export class Renderer {
     } else {
       this.drawProgrammaticSprite(agent, size);
     }
-    
-    void isHovered;
 
     if (isSelected) {
       this.ctx.strokeStyle = '#00ff00';
