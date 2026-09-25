@@ -9,7 +9,7 @@
  * Run with: node tests/claudeCodeHook.test.cjs
  */
 
-const { spawnSync } = require('child_process');
+const { spawnSync, execFileSync } = require('child_process');
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
@@ -831,45 +831,82 @@ async function runMergeLogicTests() {
       assertTrue(!changed, 'Should return false when agents are identical');
     });
     
-    // Test computeUpdatedAt logic
-    await test('computeUpdatedAt bumps timestamp on agent change', async () => {
-      const state = createUpdatedAtState();
-      
-      // First call - should set initial timestamp
-      const ts1 = computeUpdatedAt({ agent1: { status: 'idle' } }, state);
-      assertTrue(ts1, 'Should return a timestamp');
-      
-      // Second call with same agents - should return same timestamp
-      const ts2 = computeUpdatedAt({ agent1: { status: 'idle' } }, state);
-      assertEqual(ts2, ts1, 'Unchanged agents should keep same timestamp');
-      
-      // Wait a tiny bit to ensure different timestamp
-      await new Promise(r => setTimeout(r, 2));
-      
-      // Third call with changed agents - should bump timestamp
-      const ts3 = computeUpdatedAt({ agent1: { status: 'working' } }, state);
-      // The timestamp should be different (later than ts1)
-      assertTrue(new Date(ts3).getTime() >= new Date(ts1).getTime(), 'Changed agents should bump timestamp');
-      // And the state should reflect the change
-      assertEqual(state.lastSentUpdatedAt, ts3, 'State should have updated timestamp');
-    });
+    // Test computeUpdatedAt logic with injectable clock
+    // These tests use injected timestamps to deterministically test behavior
     
-    await test('computeUpdatedAt preserves timestamp on unchanged polls', async () => {
+    await test('computeUpdatedAt: unchanged polls keep same timestamp (catches always-bump bug)', async () => {
       const state = createUpdatedAtState();
-      
       const agents = { agent1: { status: 'working', activity: 'reading' } };
       
-      // First call
-      const ts1 = computeUpdatedAt(agents, state);
+      // Inject a clock that returns different times on each call
+      let callCount = 0;
+      const injectedNow = () => {
+        callCount++;
+        return '2024-01-01T00:00:0' + callCount + '.000Z';
+      };
       
-      // Multiple unchanged polls
-      const ts2 = computeUpdatedAt(agents, state);
-      const ts3 = computeUpdatedAt(agents, state);
-      const ts4 = computeUpdatedAt(agents, state);
+      // First call - sets initial timestamp
+      const ts1 = computeUpdatedAt(agents, state, injectedNow);
+      assertEqual(ts1, '2024-01-01T00:00:01.000Z', 'First call uses clock');
       
-      assertEqual(ts2, ts1, 'Second poll should keep timestamp');
-      assertEqual(ts3, ts1, 'Third poll should keep timestamp');
-      assertEqual(ts4, ts1, 'Fourth poll should keep timestamp');
+      // Subsequent calls with SAME agents - must return SAME timestamp
+      // If code has "always bump" bug, ts2 would be 02, ts3 would be 03, etc.
+      const ts2 = computeUpdatedAt(agents, state, injectedNow);
+      const ts3 = computeUpdatedAt(agents, state, injectedNow);
+      const ts4 = computeUpdatedAt(agents, state, injectedNow);
+      
+      assertEqual(ts2, ts1, 'Second poll must keep ts1 (catches always-bump)');
+      assertEqual(ts3, ts1, 'Third poll must keep ts1');
+      assertEqual(ts4, ts1, 'Fourth poll must keep ts1');
+    });
+    
+    await test('computeUpdatedAt: changed agents bump timestamp (catches never-bump bug)', async () => {
+      const state = createUpdatedAtState();
+      
+      let callCount = 0;
+      const injectedNow = () => {
+        callCount++;
+        return '2024-01-01T00:00:0' + callCount + '.000Z';
+      };
+      
+      // First call with idle agent
+      const ts1 = computeUpdatedAt({ agent1: { status: 'idle' } }, state, injectedNow);
+      assertEqual(ts1, '2024-01-01T00:00:01.000Z', 'First call uses clock');
+      
+      // Second call with CHANGED agent - must bump timestamp
+      // If code has "never bump" bug, ts2 would still be ts1
+      const ts2 = computeUpdatedAt({ agent1: { status: 'working' } }, state, injectedNow);
+      assertEqual(ts2, '2024-01-01T00:00:02.000Z', 'Changed agent must bump (catches never-bump)');
+      
+      // Verify state was updated
+      assertEqual(state.lastSentUpdatedAt, ts2, 'State should have new timestamp');
+    });
+    
+    await test('computeUpdatedAt: second change also bumps (catches stale-lastSentAgents bug)', async () => {
+      const state = createUpdatedAtState();
+      
+      let callCount = 0;
+      const injectedNow = () => {
+        callCount++;
+        return '2024-01-01T00:00:0' + callCount + '.000Z';
+      };
+      
+      // First call - idle
+      const ts1 = computeUpdatedAt({ agent1: { status: 'idle' } }, state, injectedNow);
+      assertEqual(ts1, '2024-01-01T00:00:01.000Z');
+      
+      // Second call - working (change #1)
+      const ts2 = computeUpdatedAt({ agent1: { status: 'working' } }, state, injectedNow);
+      assertEqual(ts2, '2024-01-01T00:00:02.000Z', 'First change bumps');
+      
+      // Third call - back to idle (change #2)
+      // If lastSentAgents wasn't updated properly, this would NOT bump
+      const ts3 = computeUpdatedAt({ agent1: { status: 'idle' } }, state, injectedNow);
+      assertEqual(ts3, '2024-01-01T00:00:03.000Z', 'Second change must also bump (catches stale-lastSentAgents)');
+      
+      // Fourth call - same as third, should NOT bump
+      const ts4 = computeUpdatedAt({ agent1: { status: 'idle' } }, state, injectedNow);
+      assertEqual(ts4, ts3, 'Unchanged after second change keeps ts3');
     });
     
     console.log(JSON.stringify(results));
@@ -879,10 +916,11 @@ async function runMergeLogicTests() {
   fs.writeFileSync(testScriptPath, testScript);
   
   // Use local tsx binary (from node_modules) - must work offline after npm ci
+  // execFileSync with array args handles paths with spaces correctly
   const tsxBin = path.join(PROJECT_ROOT, 'node_modules', '.bin', 'tsx');
   
   try {
-    const output = execSync(`${tsxBin} ${testScriptPath}`, {
+    const output = execFileSync(tsxBin, [testScriptPath], {
       encoding: 'utf-8',
       cwd: PROJECT_ROOT,
       timeout: 30000,

@@ -270,17 +270,17 @@ export function createUpdatedAtState(): UpdatedAtState {
 
 export function computeUpdatedAt(
   mergedAgents: Record<string, AgentStatus>,
-  state: UpdatedAtState
+  state: UpdatedAtState,
+  now: () => string = () => new Date().toISOString()
 ): string {
   if (agentsChanged(state.lastSentAgents, mergedAgents)) {
-    const newTimestamp = new Date().toISOString()
+    const newTimestamp = now()
     state.lastSentAgents = { ...mergedAgents }
     state.lastSentUpdatedAt = newTimestamp
     return newTimestamp
   } else {
-    // Re-send last sent timestamp (or initialize if first request)
     if (!state.lastSentUpdatedAt) {
-      state.lastSentUpdatedAt = new Date().toISOString()
+      state.lastSentUpdatedAt = now()
     }
     return state.lastSentUpdatedAt
   }
