@@ -61,6 +61,12 @@
       "idle": "sprites/grok.png",
       "portrait": "sprites/grok.png"
     },
+    "metabee": {
+      "name": "Metabee",
+      "sprite": "sprites/metabee.png",
+      "idle": "sprites/metabee.png",
+      "portrait": "sprites/metabee.png"
+    },
     "gemini": {
       "name": "Gemini",
       "sprite": "sprites/gemini.png",
