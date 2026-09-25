@@ -72,59 +72,78 @@ function tileClip(page, clipTiles) {
     const y = layout.offsetY + ty * layout.tile;
     const w = tw * layout.tile;
     const h = th * layout.tile;
-    const pad = layout.tile * 0.75;
     return {
-      x: rect.left + (x - pad) * scaleX,
-      y: rect.top + (y - pad) * scaleY,
-      width: (w + pad * 2) * scaleX,
-      height: (h + pad * 2) * scaleY,
+      x: rect.left + x * scaleX,
+      y: rect.top + y * scaleY,
+      width: w * scaleX,
+      height: h * scaleY,
     };
   }, clipTiles);
 }
 
-async function captureCanvasClip(page, clip) {
-  const canvas = page.locator('#game-canvas');
-  await canvas.waitFor({ state: 'visible' });
-  return canvas.screenshot({ clip });
+async function captureMapCropPng(page, clipTiles) {
+  const b64 = await page.evaluate(({ tx, ty, tw, th }) => {
+    const dash = window.__aiDashboard;
+    const canvas = document.getElementById('game-canvas');
+    const layout = dash.engine.getMapLayout();
+    const x = Math.round(layout.offsetX + tx * layout.tile);
+    const y = Math.round(layout.offsetY + ty * layout.tile);
+    const w = Math.round(tw * layout.tile);
+    const h = Math.round(th * layout.tile);
+    const out = document.createElement('canvas');
+    out.width = w;
+    out.height = h;
+    const ctx = out.getContext('2d');
+    ctx.imageSmoothingEnabled = false;
+    ctx.drawImage(canvas, x, y, w, h, 0, 0, w, h);
+    return out.toDataURL('image/png').split(',')[1];
+  }, clipTiles);
+  return Buffer.from(b64, 'base64');
 }
 
 async function captureRegion(page, url, clipTiles) {
   await page.goto(url, { waitUntil: 'domcontentloaded' });
   await waitForDashboard(page);
-  const clip = await tileClip(page, clipTiles);
-  return captureCanvasClip(page, clip);
+  return captureMapCropPng(page, clipTiles);
 }
 
-async function buildSideBySide4x(page, leftBuf, rightBuf, labels, outName) {
-  const leftB64 = leftBuf.toString('base64');
-  const rightB64 = rightBuf.toString('base64');
-  const html = `<!DOCTYPE html><html><body style="margin:0;background:#0a0a12">
-  <div style="display:flex;gap:24px;padding:16px;font:14px monospace;color:#ddd">
-    <div><div>${labels[0]}</div><canvas id="l"></canvas></div>
-    <div><div>${labels[1]}</div><canvas id="r"></canvas></div>
-  </div>
-  <script>
-  const Z=4;
-  const LEFT='${leftB64}';
-  const RIGHT='${rightB64}';
-  async function blit(id, b64) {
-    const c=document.getElementById(id);
-    const img=new Image();
-    await new Promise((ok,err)=>{img.onload=ok;img.onerror=err;img.src='data:image/png;base64,'+b64;});
-    c.width=img.width*Z; c.height=img.height*Z;
-    const ctx=c.getContext('2d');
-    ctx.imageSmoothingEnabled=false;
-    ctx.drawImage(img,0,0,c.width,c.height);
-  }
-  (async()=>{await blit('l',LEFT);await blit('r',RIGHT);})();
-  </script></body></html>`;
-  const htmlPath = path.join(root, '.tmp-screenshots/compare.html');
-  fs.mkdirSync(path.dirname(htmlPath), { recursive: true });
-  fs.writeFileSync(htmlPath, html);
-  await page.goto('file://' + htmlPath);
-  await sleep(800);
-  await page.screenshot({ path: path.join(outDir, outName), fullPage: true });
-  console.log('Wrote', outName);
+async function buildSideBySide4x(_page, leftBuf, rightBuf, labels, outName) {
+  const { createRequire } = await import('node:module');
+  const require = createRequire(import.meta.url);
+  const { PNG } = require('pngjs');
+  const Z = 4;
+  const left = PNG.sync.read(leftBuf);
+  const right = PNG.sync.read(rightBuf);
+  const labelH = 28;
+  const gap = 24;
+  const pad = 16;
+  const outW = pad * 2 + left.width * Z + gap + right.width * Z;
+  const outH = pad * 2 + labelH + Math.max(left.height, right.height) * Z;
+  const out = new PNG({ width: outW, height: outH });
+  out.data.fill(10);
+
+  const blitZoom = (src, dx, dy) => {
+    for (let y = 0; y < src.height; y++) {
+      for (let x = 0; x < src.width; x++) {
+        const si = (src.width * y + x) * 4;
+        for (let zy = 0; zy < Z; zy++) {
+          for (let zx = 0; zx < Z; zx++) {
+            const ox = dx + x * Z + zx;
+            const oy = dy + y * Z + zy;
+            const oi = (outW * oy + ox) * 4;
+            out.data[oi] = src.data[si];
+            out.data[oi + 1] = src.data[si + 1];
+            out.data[oi + 2] = src.data[si + 2];
+            out.data[oi + 3] = src.data[si + 3];
+          }
+        }
+      }
+    }
+  };
+  blitZoom(left, pad, pad + labelH);
+  blitZoom(right, pad + left.width * Z + gap, pad + labelH);
+  fs.writeFileSync(path.join(outDir, outName), PNG.sync.write(out));
+  console.log('Wrote', outName, `${outW}x${outH}`);
 }
 
 async function captureCompareScene(page, outName, pin, clipTiles, labels) {
@@ -226,16 +245,16 @@ async function main() {
       {
         key: 'wall',
         name: 'wall-front-over-avatar.png',
-        pin: 'jarvis@10,19',
-        clip: { tx: 6, ty: 17, tw: 9, th: 6 },
-        labels: ['Row-21 fence area (no avatar)', 'Jarvis @10,19 — wall-front over lower body'],
+        pin: 'jarvis@14,12',
+        clip: { tx: 11, ty: 9, tw: 6, th: 6 },
+        labels: ['6×6 tiles (no avatar)', 'Jarvis @14,12 — wall-front overlap check'],
       },
       {
         key: 'shadow',
         name: 'shadow-under-furniture.png',
-        pin: 'jarvis@16,6',
-        clip: { tx: 14, ty: 4, tw: 8, th: 6 },
-        labels: ['Furniture-mid @17,6 (no avatar)', 'Jarvis beside mid furniture — shadow under mid'],
+        pin: 'jarvis@17,7',
+        clip: { tx: 14, ty: 4, tw: 6, th: 6 },
+        labels: ['6×6 tiles (no avatar)', 'Jarvis @17,7 — shadow vs furniture-mid'],
       },
     ];
 

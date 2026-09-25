@@ -38,10 +38,11 @@ const fixturesDir = path.resolve(__dirname, 'fixtures/main-branch-sprites');
 const originalsDir = path.resolve(__dirname, '../public/assets/sprites/originals');
 
 const SWAPPED_SPRITES = [
-  'apple.png', 'bumblebee.png', 'claude.png', 'claude_code.png', 'claude_cowork.png',
-  'claude_grunt02.png', 'cursor_grunt01.png', 'cursor_grunt02.png', 'friday.png',
-  'gemini.png', 'grok_grunt.png', 'grok-v1.png', 'jarvis.png', 'laya.png',
+  'apple.png', 'claude.png', 'claude_grunt02.png', 'cursor_grunt01.png', 'cursor_grunt02.png',
+  'friday.png', 'grok_grunt.png', 'grok-v1.png', 'laya.png',
 ];
+
+const BUMBLEBEE_SPRITE = 'bumblebee.png';
 
 const GROK_IDLE_SPRITE = 'grok.png';
 const METABEE_SPRITE = 'metabee.png';
@@ -57,16 +58,6 @@ const RECONVERTED_PIPELINE = {
   'claude.png': { sheet: 'public/assets/sprites/sheets/claude-grunt01.png', idleCol: 1, kind: 'rpg' },
   'claude_cowork.png': {
     sheet: 'public/assets/sprites/sheets/claude-cowork.png',
-    idleCol: 1,
-    kind: 'rpg',
-  },
-  'cursor_grunt02.png': {
-    sheet: 'public/assets/sprites/sheets/cursor-grunt02.png',
-    idleCol: 1,
-    kind: 'rpg',
-  },
-  'cursor_grunt01.png': {
-    sheet: 'public/assets/sprites/sheets/cursor-grunt01.png',
     idleCol: 1,
     kind: 'rpg',
   },
@@ -159,7 +150,7 @@ function buildGrokExpectedStrip() {
   return fs.readFileSync(tmpFinal);
 }
 
-function buildRpgPipelineExpectedStrip(spriteName) {
+function buildRpgPipelineExpectedStrip(spriteName, reorder = true) {
   const spec = RECONVERTED_PIPELINE[spriteName];
   const root = path.resolve(__dirname, '..');
   const sheetPath = path.join(root, spec.sheet);
@@ -170,10 +161,14 @@ function buildRpgPipelineExpectedStrip(spriteName) {
     `python3 scripts/convert-rpg-sheet.py "${sheetPath}" "${tmpStrip}" --idle-col ${spec.idleCol}`,
     { cwd: root, stdio: 'pipe' }
   );
-  execSync(`python3 scripts/reorder-strip-frames.py "${tmpStrip}" "${tmpFinal}"`, {
-    cwd: root,
-    stdio: 'pipe',
-  });
+  if (reorder) {
+    execSync(`python3 scripts/reorder-strip-frames.py "${tmpStrip}" "${tmpFinal}"`, {
+      cwd: root,
+      stdio: 'pipe',
+    });
+  } else {
+    fs.copyFileSync(tmpStrip, tmpFinal);
+  }
   return fs.readFileSync(tmpFinal);
 }
 
@@ -243,6 +238,27 @@ for (const [dir, origin] of Object.entries(DIRECTION_ORIGINS)) {
       prFrame.equals(expectedFrame),
       `${GROK_IDLE_SPRITE} ${dir}: idle frame must match --idle-col 2 + reorder pipeline`
     );
+  });
+}
+
+console.log('\n--- Bumblebee: native frame order 123456789 (no 213 swap) ---\n');
+
+for (const [dir, origin] of Object.entries(DIRECTION_ORIGINS)) {
+  test(`${BUMBLEBEE_SPRITE} ${dir}: PR idle matches convert pipeline (no reorder)`, () => {
+    const currentBuffer = getCurrentSpriteBuffer(BUMBLEBEE_SPRITE);
+    assert.ok(currentBuffer, `Missing ${BUMBLEBEE_SPRITE}`);
+    const root = path.resolve(__dirname, '..');
+    const tmpStrip = path.join(__dirname, '../.tmp-screenshots/bumblebee-expected.png');
+    fs.mkdirSync(path.dirname(tmpStrip), { recursive: true });
+    execSync(
+      `python3 scripts/convert-rpg-sheet.py "${path.join(root, 'public/assets/sprites/sheets/bumblebee.png')}" "${tmpStrip}" --idle-col 1`,
+      { cwd: root, stdio: 'pipe' }
+    );
+    const expectedBuffer = fs.readFileSync(tmpStrip);
+    const prIdlePos = origin + STRIP_COL_IDLE;
+    const prFrame = extractFramePixels(currentBuffer, prIdlePos);
+    const expectedFrame = extractFramePixels(expectedBuffer, prIdlePos);
+    assert.ok(prFrame.equals(expectedFrame), `${BUMBLEBEE_SPRITE} ${dir}: idle must match native-order pipeline`);
   });
 }
 

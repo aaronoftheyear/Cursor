@@ -63,6 +63,25 @@ export function engineResolveSpawnFootTile(
   return candidates[idx];
 }
 
+/**
+ * Same resolver + occupied fallback as GameEngine.resolveSpawnFootTile (for behavioural tests).
+ */
+export function engineGameSpawnFootTile(
+  collisionMap: CollisionMap,
+  room: Room | null,
+  walkableFallback: TileCoord[],
+  canOccupyTile: (tile: TileCoord) => boolean
+): TileCoord | null {
+  const tile = engineResolveSpawnFootTile(collisionMap, room, walkableFallback);
+  if (tile && canOccupyTile(tile)) return tile;
+  const bottomRow = engineSpawnBottomRow(collisionMap.height);
+  const shuffled = [...filterOutBottomRow(walkableFallback, bottomRow)].sort(() => Math.random() - 0.5);
+  for (const fallback of shuffled) {
+    if (canOccupyTile(fallback)) return fallback;
+  }
+  return null;
+}
+
 const MOVE_SPEED = 1.15;
 const WORK_MOVE_SPEED = 1.25;
 const FRAME_DURATION = 150; // Walk cycle frame duration in ms
@@ -269,16 +288,10 @@ export class GameEngine {
     if (!collisionMap) return null;
 
     const room = gameMap.getRoomForAgent(agentId) ?? null;
-    const tile = engineResolveSpawnFootTile(
-      collisionMap,
-      room,
-      this.getAllWalkableTiles(agent)
+    const walkables = this.getAllWalkableTiles(agent);
+    return engineGameSpawnFootTile(collisionMap, room, walkables, (t) =>
+      this.canOccupyTile(t.x, t.y, agent)
     );
-
-    if (tile && this.canOccupyTile(tile.x, tile.y, agent)) {
-      return tile;
-    }
-    return null;
   }
 
   private findNearestWalkableFootTile(agent: Agent, preferred: TileCoord): TileCoord | null {

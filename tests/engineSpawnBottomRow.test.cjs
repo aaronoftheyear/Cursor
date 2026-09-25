@@ -27,7 +27,7 @@ function test(name, fn) {
 
 const root = path.resolve(__dirname, '..');
 const tsxPath = path.resolve(__dirname, '../node_modules/.bin/tsx');
-const engineSrc = fs.readFileSync(path.join(root, 'src/engine.ts'), 'utf-8');
+const enginePath = path.join(root, 'src/engine.ts');
 
 function callEngine(fnName, ...args) {
   const argsJson = args.map((a) => JSON.stringify(a)).join(', ');
@@ -73,41 +73,14 @@ test('engineResolveSpawnFootTile never spawns on bottom row', () => {
   }
 });
 
-test('resolveSpawnFootTile uses engineSpawnBottomRow (not hardcoded -1)', () => {
-  assert.ok(engineSrc.includes('engineSpawnBottomRow(collisionMap.height)'));
-  assert.ok(engineSrc.includes('engineResolveSpawnFootTile'));
-});
-
-test('mutation bottomRow=-1 allows bottom-row spawn (guard must use height-1)', () => {
+function runGameSpawnProbe() {
   const code = `
-    const { pickEngineSpawnFootTile } = require('./src/spawnGuard.ts');
+    const { engineGameSpawnFootTile } = require('./src/engine.ts');
     const map = ${JSON.stringify(walkableBottomMap)};
-    const room = ${JSON.stringify(room)};
-    const walkables = ${JSON.stringify(allWalkable)};
-    let hitBottom = false;
-    for (let i = 0; i < 40; i++) {
-      const tile = pickEngineSpawnFootTile(map, room, walkables, -1);
-      if (tile && tile.y === ${bottomRow}) hitBottom = true;
-    }
-    console.log(JSON.stringify({ hitBottom }));
-  `;
-  const result = execSync(`"${tsxPath}" -e "${code.replace(/"/g, '\\"').replace(/\n/g, ' ')}"`, {
-    cwd: root,
-    encoding: 'utf-8',
-  });
-  const { hitBottom } = JSON.parse(result.trim());
-  assert.ok(hitBottom, 'bottomRow=-1 mutation must be detectable (spawns on bottom row)');
-});
-
-function runEngineResolveSpawnProbe() {
-  const code = `
-    const { engineResolveSpawnFootTile } = require('./src/engine.ts');
-    const map = ${JSON.stringify(walkableBottomMap)};
-    const room = ${JSON.stringify(room)};
     const walkables = ${JSON.stringify(allWalkable)};
     let hitBottom = false;
     for (let i = 0; i < 80; i++) {
-      const tile = engineResolveSpawnFootTile(map, room, walkables);
+      const tile = engineGameSpawnFootTile(map, null, walkables, () => true);
       if (tile && tile.y === ${bottomRow}) hitBottom = true;
     }
     if (hitBottom) process.exit(2);
@@ -119,16 +92,33 @@ function runEngineResolveSpawnProbe() {
   });
 }
 
+test('engineGameSpawnFootTile avoids bottom row (same path as GameEngine)', () => {
+  const code = `
+    const { engineGameSpawnFootTile } = require('./src/engine.ts');
+    const map = ${JSON.stringify(walkableBottomMap)};
+    const walkables = ${JSON.stringify(allWalkable)};
+    let hitBottom = false;
+    for (let i = 0; i < 80; i++) {
+      const tile = engineGameSpawnFootTile(map, null, walkables, (t) => t.y !== ${bottomRow});
+      if (tile && tile.y === ${bottomRow}) hitBottom = true;
+    }
+    if (hitBottom) process.exit(2);
+    console.log('ok');
+  `;
+  execSync(`"${tsxPath}" -e "${code.replace(/"/g, '\\"').replace(/\n/g, ' ')}"`, {
+    cwd: root,
+    encoding: 'utf-8',
+  });
+});
+
 test('engine.ts mutation bottomRow=-1 fails engineResolveSpawnFootTile probe', () => {
-  const enginePath = path.join(root, 'src/engine.ts');
   const original = fs.readFileSync(enginePath, 'utf-8');
   const mutated = original.replace('return mapHeight - 1;', 'return -1;');
-  assert.notStrictEqual(mutated, original);
   fs.writeFileSync(enginePath, mutated);
   try {
     let threw = false;
     try {
-      runEngineResolveSpawnProbe();
+      runGameSpawnProbe();
     } catch {
       threw = true;
     }
@@ -138,28 +128,48 @@ test('engine.ts mutation bottomRow=-1 fails engineResolveSpawnFootTile probe', (
   }
 });
 
-test('engine.ts mutation forced {0,height-1} spawn fails engineResolveSpawnFootTile probe', () => {
-  const enginePath = path.join(root, 'src/engine.ts');
+test('engine.ts mutation bypassing resolver fails engineGameSpawnFootTile probe', () => {
   const original = fs.readFileSync(enginePath, 'utf-8');
-  const needle =
-    'const tile = pickEngineSpawnFootTile(collisionMap, room, walkableFallback, bottomRow);';
   const mutated = original.replace(
-    needle,
+    'const tile = engineResolveSpawnFootTile(collisionMap, room, walkableFallback);',
     'const tile = { x: 0, y: collisionMap.height - 1 };'
   );
-  assert.ok(mutated.includes('y: collisionMap.height - 1'), 'mutation apply failed');
+  assert.notStrictEqual(mutated, original);
   fs.writeFileSync(enginePath, mutated);
   try {
     let threw = false;
     try {
-      runEngineResolveSpawnProbe();
+      runGameSpawnProbe();
     } catch {
       threw = true;
     }
-    assert.ok(threw, 'probe must fail when engine always spawns at {0,height-1}');
+    assert.ok(threw, 'probe must fail when spawn bypasses resolver and forces bottom row');
   } finally {
     fs.writeFileSync(enginePath, original);
   }
+});
+
+test('occupied tile rejection tries another walkable tile', () => {
+  const code = `
+    const { engineGameSpawnFootTile } = require('./src/engine.ts');
+    const map = ${JSON.stringify(walkableBottomMap)};
+    const walkables = [{ x: 2, y: 1 }, { x: 3, y: 1 }];
+    const blocked = new Set(['2,1']);
+    const canOccupy = (t) => !blocked.has(t.x + ',' + t.y);
+    let ok = false;
+    for (let i = 0; i < 30; i++) {
+      const tile = engineGameSpawnFootTile(map, null, walkables, canOccupy);
+      if (tile && canOccupy(tile)) ok = true;
+    }
+    console.log(JSON.stringify(ok));
+  `;
+  const ok = JSON.parse(
+    execSync(`"${tsxPath}" -e "${code.replace(/"/g, '\\"').replace(/\n/g, ' ')}"`, {
+      cwd: root,
+      encoding: 'utf-8',
+    }).trim()
+  );
+  assert.ok(ok, 'fallback must eventually return a non-blocked walkable tile');
 });
 
 test('mutation forced spawn {0,height-1} is invalid spawn', () => {
@@ -167,14 +177,14 @@ test('mutation forced spawn {0,height-1} is invalid spawn', () => {
     const { isValidSpawnPosition } = require('./src/spawnGuard.ts');
     const map = ${JSON.stringify(walkableBottomMap)};
     const br = map.height - 1;
-    const forced = { x: 0, y: br };
-    console.log(JSON.stringify(isValidSpawnPosition(map, forced, br)));
+    console.log(JSON.stringify(isValidSpawnPosition(map, { x: 0, y: br }, br)));
   `;
-  const result = execSync(`"${tsxPath}" -e "${code.replace(/"/g, '\\"').replace(/\n/g, ' ')}"`, {
-    cwd: root,
-    encoding: 'utf-8',
-  });
-  const validation = JSON.parse(result.trim());
+  const validation = JSON.parse(
+    execSync(`"${tsxPath}" -e "${code.replace(/"/g, '\\"').replace(/\n/g, ' ')}"`, {
+      cwd: root,
+      encoding: 'utf-8',
+    }).trim()
+  );
   assert.strictEqual(validation.valid, false);
 });
 

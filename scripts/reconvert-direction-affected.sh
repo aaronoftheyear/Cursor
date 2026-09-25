@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Re-convert avatars that had direction-dependent on-screen size (round 10).
+# Re-convert avatars with direction-dependent size (uniform scale, widest frame → 16px cell).
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 SHEETS="$ROOT/public/assets/sprites/sheets"
@@ -18,13 +18,9 @@ reconvert_rpg "cursor-jarvis-v2.png" "jarvis.png"
 reconvert_rpg "gemini.png" "gemini.png"
 reconvert_rpg "claude-grunt01.png" "claude.png"
 reconvert_rpg "claude-cowork.png" "claude_cowork.png"
-reconvert_rpg "cursor-grunt02.png" "cursor_grunt02.png"
-reconvert_rpg "cursor-grunt01.png" "cursor_grunt01.png"
 reconvert_rpg "cluade-code.png" "claude_code.png"
 
-# Grok: keep idle-col 2 pipeline
-python3 "$ROOT/scripts/convert-sprite-sheet.py" \
-  "$ROOT/public/assets/sprites/originals/grok-v2.png" "$TMP/grok-strip.png" --idle-col 2
-python3 "$ROOT/scripts/reorder-strip-frames.py" "$TMP/grok-strip.png" "$OUT/grok.png"
+# Bumblebee: Aaron's original frame order 123456789 (no 213 swap).
+python3 "$ROOT/scripts/convert-rpg-sheet.py" "$SHEETS/bumblebee.png" "$OUT/bumblebee.png" --idle-col 1
 
-echo "Re-converted direction-affected sprites."
+echo "Re-converted direction-affected RPG sprites (Grok/Cursor grunts unchanged)."
