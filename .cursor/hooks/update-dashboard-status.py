@@ -8,16 +8,18 @@ import json
 import sys
 import time
 from datetime import datetime, timezone
+import os
 from pathlib import Path
 
-PROJECT_ROOT = Path(__file__).resolve().parents[2]
+# Support PROJECT_ROOT override for testing
+PROJECT_ROOT = Path(os.environ.get("DASHBOARD_PROJECT_ROOT", Path(__file__).resolve().parents[2]))
 STATUS_DIR = PROJECT_ROOT / ".dashboard"
 STATUS_FILE = STATUS_DIR / "live-status.json"
 PUBLIC_MIRROR = PROJECT_ROOT / "public" / "live-status.json"
 LINKS_FILE = PROJECT_ROOT / "public" / "assets" / "agent-links.json"
 SEEN_EVENTS_FILE = STATUS_DIR / "seen-events.json"
 
-DEFAULT_AGENTS = ("jarvis", "friday", "bumblebee")
+DEFAULT_AGENTS = ("jarvis", "friday", "bumblebee", "claude-code")
 
 # Self-healing timeout: reset working agents to idle if no events for this long
 STALE_TIMEOUT_SECONDS = 300  # 5 minutes
@@ -145,29 +147,45 @@ def load_agent_link_specs() -> dict[str, dict[str, list[str]]]:
         "markers": [],
         "workspaces": [],
         "agent_names": [],
+        "source": "cursor",
     }
     out: dict[str, dict[str, list[str]]] = {
         agent_id: dict(empty) for agent_id in DEFAULT_AGENTS
     }
+    out["claude-code"]["source"] = "claude-code"
     if not LINKS_FILE.is_file():
         return out
     try:
         data = json.loads(LINKS_FILE.read_text(encoding="utf-8"))
         for agent_id, spec in (data.get("agents") or {}).items():
             cursor = spec.get("cursor") if isinstance(spec, dict) else None
-            if not isinstance(cursor, dict):
-                continue
-            out[agent_id] = {
-                "markers": [
-                    str(m).lower() for m in cursor.get("payloadContains") or []
-                ],
-                "workspaces": [
-                    str(w).lower() for w in cursor.get("workspaceContains") or []
-                ],
-                "agent_names": [
-                    str(n).lower() for n in cursor.get("agentNameContains") or []
-                ],
-            }
+            if isinstance(cursor, dict):
+                out[agent_id] = {
+                    "markers": [
+                        str(m).lower() for m in cursor.get("payloadContains") or []
+                    ],
+                    "workspaces": [
+                        str(w).lower() for w in cursor.get("workspaceContains") or []
+                    ],
+                    "agent_names": [
+                        str(n).lower() for n in cursor.get("agentNameContains") or []
+                    ],
+                    "source": "cursor",
+                }
+            claude = spec.get("claude") if isinstance(spec, dict) else None
+            if isinstance(claude, dict):
+                out[agent_id] = {
+                    "markers": [
+                        str(m).lower() for m in claude.get("payloadContains") or []
+                    ],
+                    "workspaces": [
+                        str(w).lower() for w in claude.get("workspaceContains") or []
+                    ],
+                    "agent_names": [
+                        str(n).lower() for n in claude.get("agentNameContains") or []
+                    ],
+                    "source": "claude-code",
+                }
     except (json.JSONDecodeError, OSError):
         pass
     return out
@@ -321,6 +339,8 @@ def resolve_matched_agents(hook: dict, specs: dict[str, dict[str, list[str]]]) -
 
 
 def is_relevant_session(hook: dict, specs: dict[str, dict[str, list[str]]]) -> bool:
+    if is_claude_code_session(hook):
+        return True
     if resolve_matched_agents(hook, specs):
         return True
     return is_dashboard_workspace(hook)
@@ -331,12 +351,18 @@ def default_agent_status(agent_id: str) -> dict:
         "jarvis": "Waiting for Cursor session",
         "friday": "Waiting for F.R.I.D.A.Y. session",
         "bumblebee": "Waiting for Bumblebee session",
+        "claude-code": "Waiting for Claude Code session",
     }
     return {
         "status": "idle",
-        "source": "cursor",
+        "source": "claude-code" if agent_id == "claude-code" else "cursor",
         "detail": labels.get(agent_id, "Idle"),
     }
+
+
+def is_claude_code_session(hook: dict) -> bool:
+    """Check if this is a Claude Code session (not Cursor)."""
+    return hook.get("claude_code") is True or hook.get("source") == "claude-code"
 
 
 def load_state() -> dict:
@@ -372,11 +398,12 @@ def set_agent(
     detail: str,
     activity: str | None = None,
     activity_depth: str | None = "brief",
+    source: str | None = None,
 ) -> None:
     agents = state.setdefault("agents", {})
     entry: dict = {
         "status": status,
-        "source": "cursor",
+        "source": source or ("claude-code" if agent_id == "claude-code" else "cursor"),
         "detail": detail,
     }
     if activity and activity in ACTIVITY_LABELS:
@@ -450,14 +477,78 @@ def tool_name(hook: dict) -> str:
 
 
 def is_github_shell_command(cmd: str) -> bool:
-    """Check if shell command is a GitHub/git operation."""
+    """Check if shell command contains a GitHub/git operation anywhere in the chain.
+    
+    Splits on &&, ;, | to find actual command words, avoiding false positives
+    like "echo high score" matching "gh ".
+    
+    Handles:
+    - cd /tmp && gh pr list
+    - sudo gh pr view
+    - FOO=1 gh pr view (env var assignment prefix)
+    - git -C repo status (git with options before subcommand)
+    """
     if not cmd or not isinstance(cmd, str):
         return False
-    cmd = cmd.strip().lower()
-    if cmd.startswith("gh "):
-        return True
-    git_remote_ops = ("git push", "git pull", "git fetch", "git clone")
-    return any(cmd.startswith(op) for op in git_remote_ops)
+    
+    import re
+    # Split on shell separators: &&, ||, ;, |, and also handle subshells
+    segments = re.split(r'\s*(?:&&|\|\||[;|])\s*', cmd)
+    
+    for segment in segments:
+        segment = segment.strip()
+        if not segment:
+            continue
+        
+        words = segment.split()
+        if not words:
+            continue
+        
+        # Skip environment variable assignments (VAR=value) and common prefixes
+        i = 0
+        while i < len(words):
+            word = words[i].lower()
+            # Skip env var assignments like FOO=1 or FOO="bar"
+            if '=' in words[i] and not words[i].startswith('-'):
+                i += 1
+                continue
+            # Skip common shell prefixes
+            if word in ('cd', 'pushd', 'env', 'sudo', 'time', 'nice', 'nohup'):
+                i += 1
+                # For cd/pushd, skip the path argument too
+                if word in ('cd', 'pushd') and i < len(words) and not words[i].startswith('-'):
+                    i += 1
+                continue
+            break
+        
+        if i >= len(words):
+            continue
+        
+        cmd_word = words[i].lower()
+        
+        # Check for gh CLI (must be the command word, not substring)
+        if cmd_word == 'gh':
+            return True
+        
+        # Check for git operations (git must be the command word)
+        if cmd_word == 'git':
+            # Find the subcommand, skipping any options like -C, --git-dir, etc.
+            j = i + 1
+            while j < len(words):
+                if words[j].startswith('-'):
+                    # Skip option and its argument if it takes one
+                    if words[j] in ('-C', '-c', '--git-dir', '--work-tree'):
+                        j += 2  # skip option and its value
+                    else:
+                        j += 1  # skip just the option
+                else:
+                    # Found the subcommand
+                    git_subcommand = words[j].lower()
+                    if git_subcommand in ('push', 'pull', 'fetch', 'clone', 'commit', 'status'):
+                        return True
+                    break
+    
+    return False
 
 
 def activity_from_hook(event: str, hook: dict) -> tuple[str, str]:
@@ -484,7 +575,7 @@ def activity_from_hook(event: str, hook: dict) -> tuple[str, str]:
         return "running", ACTIVITY_LABELS["running"]
 
     if event in ("preToolUse", "postToolUse"):
-        if tool in ("shell",) or tool.endswith("shell"):
+        if tool in ("shell", "bash") or tool.endswith("shell"):
             cmd = hook.get("command") or hook.get("input", {}).get("command") or ""
             if is_github_shell_command(cmd):
                 return "github", ACTIVITY_LABELS["github"]
@@ -496,21 +587,32 @@ def activity_from_hook(event: str, hook: dict) -> tuple[str, str]:
             "grep",
             "glob",
             "list_dir",
+            "ls",
             "semanticsearch",
         ):
             return "reading", ACTIVITY_LABELS["reading"]
+        if tool in (
+            "task",
+            "switchmode",
+            "todo_write",
+            "todowrite",
+            "creategoal",
+            "updategoal",
+            "exitplanmode",
+        ):
+            return "planning", ACTIVITY_LABELS["planning"]
         if tool in (
             "write",
             "strreplace",
             "search_replace",
             "edit",
+            "multiedit",
             "applypatch",
             "delete",
             "editnotebook",
+            "notebookedit",
         ):
             return "editing", ACTIVITY_LABELS["editing"]
-        if tool in ("task", "switchmode", "todo_write", "creategoal", "updategoal"):
-            return "planning", ACTIVITY_LABELS["planning"]
         if "github" in tool or tool.startswith("github_"):
             return "github", ACTIVITY_LABELS["github"]
         if "mcp" in tool or tool.startswith("call"):
@@ -533,6 +635,9 @@ def activity_from_hook(event: str, hook: dict) -> tuple[str, str]:
 
 
 def target_agents(hook: dict, specs: dict[str, dict[str, list[str]]]) -> list[str]:
+    # Claude Code sessions always target claude-code agent
+    if is_claude_code_session(hook):
+        return ["claude-code"]
     matched = resolve_matched_agents(hook, specs)
     if matched:
         return matched
@@ -548,6 +653,9 @@ def detail_for_agent(agent_id: str, activity: str, detail: str) -> str:
     if agent_id == "bumblebee":
         label = ACTIVITY_LABELS.get(activity, detail)
         return f"Cloud worker — {label}"
+    if agent_id == "claude-code":
+        label = ACTIVITY_LABELS.get(activity, detail)
+        return f"Claude Code — {label}"
     return detail
 
 

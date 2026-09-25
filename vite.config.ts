@@ -2,32 +2,18 @@ import fs from 'node:fs'
 import path from 'node:path'
 import type { Connect } from 'vite'
 import { defineConfig, loadEnv } from 'vite'
+import {
+  mergeExternalAgents,
+  createUpdatedAtState,
+  computeUpdatedAt,
+  type AgentStatus,
+  type LiveStatus,
+  type ExternalAgents,
+  type CloudAgentStatus,
+} from './server/liveStatusMerge'
 
-const EXTERNAL_STALE_MS = 120_000 // 2 minutes
 const CURSOR_STALE_MS = 300_000 // 5 minutes - self-healing for stuck agents
-const DEFAULT_AGENTS = ['jarvis', 'friday', 'bumblebee'] as const
-
-interface AgentStatus {
-  status: string
-  detail?: string | null
-  source?: string
-  updatedAt?: string
-  activity?: string
-  activityDepth?: 'brief' | 'deep'
-}
-
-interface LiveStatus {
-  updatedAt?: string
-  activeSessions?: number
-  activeTerminals?: number
-  agentSessions?: Record<string, number>
-  lastEventAt?: Record<string, number>
-  agents: Record<string, AgentStatus>
-}
-
-interface ExternalAgents {
-  agents: Record<string, AgentStatus & { updatedAt?: string }>
-}
+const DEFAULT_AGENTS = ['jarvis', 'friday', 'bumblebee', 'claude-code'] as const
 
 interface AgentLinksConfig {
   version: number
@@ -43,20 +29,15 @@ interface AgentLinksConfig {
   }>
 }
 
-interface CloudAgentStatus {
-  status: 'idle' | 'working' | 'busy'
-  detail?: string
-  activity?: string
-  activityDepth?: 'brief' | 'deep'
-  source: 'cloud-api'
-  cloudAgentId?: string
-  cloudRunStatus?: string
-}
-
 // Cloud agent poller state
 let cloudAgentCache: Map<string, CloudAgentStatus> = new Map()
+// Separate cache for all cloud agents by bc-id (for waiting-on checks)
+let cloudAgentByIdCache: Map<string, CloudAgentStatus> = new Map()
 let cloudPollTime = 0
 const CLOUD_POLL_INTERVAL_MS = 30_000
+
+// Track last sent response for updatedAt comparison
+const updatedAtState = createUpdatedAtState()
 
 function readJsonSafe<T>(filePath: string, fallback: T): T {
   try {
@@ -114,44 +95,14 @@ function healStaleAgents(live: LiveStatus): LiveStatus {
   return healed
 }
 
-function mergeExternalAgents(live: LiveStatus, external: ExternalAgents): LiveStatus {
-  const now = Date.now()
-  const merged = { ...live, agents: { ...live.agents } }
-
-  for (const [agentId, extStatus] of Object.entries(external.agents || {})) {
-    if (!extStatus.updatedAt) continue
-
-    const updatedAt = new Date(extStatus.updatedAt).getTime()
-    const isStale = now - updatedAt > EXTERNAL_STALE_MS
-
-    if (isStale) {
-      merged.agents[agentId] = {
-        status: 'idle',
-        detail: 'External agent idle (stale)',
-        source: 'external',
-      }
-    } else {
-      const entry: AgentStatus = {
-        status: extStatus.status,
-        source: 'external',
-      }
-      if (extStatus.detail) entry.detail = extStatus.detail
-      if (extStatus.activity) entry.activity = extStatus.activity
-      if (extStatus.activityDepth) entry.activityDepth = extStatus.activityDepth
-      merged.agents[agentId] = entry
-    }
-  }
-
-  return merged
-}
-
 async function pollCloudAgentsApi(config: AgentLinksConfig, apiKey: string | undefined): Promise<Map<string, CloudAgentStatus>> {
   if (!apiKey) {
     return new Map()
   }
 
   const now = Date.now()
-  if (now - cloudPollTime < CLOUD_POLL_INTERVAL_MS && cloudAgentCache.size > 0) {
+  // Always cache for 30s, even when no agents match avatars
+  if (now - cloudPollTime < CLOUD_POLL_INTERVAL_MS) {
     return cloudAgentCache
   }
 
@@ -168,14 +119,18 @@ async function pollCloudAgentsApi(config: AgentLinksConfig, apiKey: string | und
       if (res.status === 401 || res.status === 403) {
         console.warn('[CloudAgentPoller] Invalid CURSOR_API_KEY or insufficient permissions')
       }
+      // Still update poll time to avoid hammering on errors
+      cloudPollTime = now
       return cloudAgentCache
     }
 
     const data = await res.json() as { items: Array<{ id: string; name?: string; latestRunId?: string }> }
     const newCache = new Map<string, CloudAgentStatus>()
+    const newIdCache = new Map<string, CloudAgentStatus>()
 
     for (const agent of data.items || []) {
-      const agentName = (agent.name || '').toLowerCase()
+      const agentName = agent.name || ''
+      const agentNameLower = agentName.toLowerCase()
       let avatarId: string | null = null
 
       for (const [id, spec] of Object.entries(config.agents)) {
@@ -183,15 +138,13 @@ async function pollCloudAgentsApi(config: AgentLinksConfig, apiKey: string | und
         const cloudSpec = spec.cloud || spec.cursor
         if (!cloudSpec?.agentNameContains) continue
         for (const hint of cloudSpec.agentNameContains) {
-          if (agentName.includes(hint.toLowerCase())) {
+          if (agentNameLower.includes(hint.toLowerCase())) {
             avatarId = id
             break
           }
         }
         if (avatarId) break
       }
-
-      if (!avatarId) continue
 
       let runStatus: 'idle' | 'working' = 'idle'
       let detail = 'Cloud agent idle'
@@ -229,22 +182,32 @@ async function pollCloudAgentsApi(config: AgentLinksConfig, apiKey: string | und
         detail,
         source: 'cloud-api',
         cloudAgentId: agent.id,
+        cloudAgentName: agentName,
       }
       if (runStatus === 'working') {
         status.activity = 'thinking'
         status.activityDepth = 'deep'
       }
 
-      const existing = newCache.get(avatarId)
-      if (!existing || (status.status === 'working' && existing.status !== 'working')) {
-        newCache.set(avatarId, status)
+      // Store in id cache for all agents (for waiting-on checks)
+      newIdCache.set(agent.id, status)
+
+      // Only store in avatar cache if it matches an avatar
+      if (avatarId) {
+        const existing = newCache.get(avatarId)
+        if (!existing || (status.status === 'working' && existing.status !== 'working')) {
+          newCache.set(avatarId, status)
+        }
       }
     }
 
     cloudAgentCache = newCache
+    cloudAgentByIdCache = newIdCache
     cloudPollTime = now
   } catch (err) {
     console.warn('[CloudAgentPoller] Poll failed:', err)
+    // Update poll time on error to avoid tight retry loops
+    cloudPollTime = now
   }
 
   return cloudAgentCache
@@ -287,10 +250,17 @@ function createLiveStatusMiddleware(cursorApiKey: string | undefined) {
 
     live = healStaleAgents(live)
 
-    let merged = mergeExternalAgents(live, external)
-
+    // Poll cloud agents first so we can use their status for waiting-on checks
     const cloudStatus = await pollCloudAgentsApi(linksConfig, cursorApiKey)
+
+    // Merge external agents with cloud status for waiting-on auto-clear
+    let merged = await mergeExternalAgents(live, external, cursorApiKey, cloudAgentByIdCache)
+
+    // Finally merge cloud agent status
     merged = mergeCloudAgents(merged, cloudStatus)
+
+    // Compute updatedAt (bumps on change, re-sends last on no-change)
+    merged.updatedAt = computeUpdatedAt(merged.agents, updatedAtState)
 
     res.statusCode = 200
     res.setHeader('Content-Type', 'application/json')

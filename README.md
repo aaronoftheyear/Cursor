@@ -162,7 +162,46 @@ Use the CLI script to report status from any shell command:
 | `-a, --activity <activity>` | Activity type (required when status is working/busy) |
 | `-d, --depth <depth>` | Activity depth: `brief` (stay at desk) or `deep` (walk to spot) |
 | `-m, --message <text>` | Detail message shown in sidebar |
+| `-t, --ttl <duration>` | Time-to-live before auto-expiring to idle (default: 2m, max: 2h) |
+| `--waiting-on <bc-id\|name>` | Cloud agent ID or name to wait on; auto-clears when it finishes |
 | `-h, --help` | Show help with all options |
+
+### TTL (Time-to-Live)
+
+By default, external agent status expires after 2 minutes if not updated. Use the `-t` flag for custom TTL:
+
+```bash
+# TTL in seconds
+./scripts/set-agent-status.sh metabee working -a running -t 300 -m "Long task"
+
+# TTL in minutes
+./scripts/set-agent-status.sh metabee working -a running -t 5m
+
+# TTL in hours (max 2 hours)
+./scripts/set-agent-status.sh metabee working -a running -t 1h
+
+# Compound format
+./scripts/set-agent-status.sh metabee working -a running -t 1h30m
+```
+
+### Waiting on Cloud Agents
+
+Use `--waiting-on` when an external agent is waiting for a cloud agent to finish:
+
+```bash
+# Wait on a cloud agent by bc-ID
+./scripts/set-agent-status.sh metabee working -a waiting --waiting-on "bc-abc123" -t 1h
+
+# Wait on a cloud agent by name
+./scripts/set-agent-status.sh metabee working --waiting-on "Connect Claude Code" -t 1h -m "Waiting on FRIDAY"
+```
+
+When `--waiting-on` is specified:
+- The activity defaults to `waiting` if not set
+- The status defaults to `working` even if `idle` is specified
+- Status auto-clears when the referenced cloud agent finishes
+
+**Note:** Auto-clearing requires `CURSOR_API_KEY` to be set (see [Cloud Agent Status](#cloud-agent-status-friday--bumblebee)). Without it, waiting status only clears when the TTL expires.
 
 ### Activities (same as Cursor hooks)
 
@@ -177,6 +216,7 @@ These map to action spots in the game world:
 | `running` | Running shell commands | Stays at computer | Stays at computer |
 | `researching` | Web research, online search | Stays at computer | Walks to research TV/spot |
 | `github` | GitHub ops, git push/pull/clone, gh CLI | Stays at computer | Walks to GitHub spot |
+| `waiting` | Waiting for another agent or process | Stays at computer | Stays at computer |
 
 ### Examples
 
@@ -236,6 +276,45 @@ For a Grok-based desktop assistant, add these calls:
 ```
 
 The status file is written to `.dashboard/external-agents.json` and is not tracked by git.
+
+## Claude Code Integration
+
+The dashboard integrates with [Claude Code](https://claude.ai/code) (Anthropic's CLI) to show real-time status for the `claude-code` avatar. Claude Code events are translated to the same activity vocabulary as Cursor hooks, so the avatar walks to matching action spots.
+
+### Installing Claude Code Hooks
+
+```bash
+# Install hooks (merges into ~/.claude/settings.json)
+./scripts/install-claude-hooks.sh
+
+# Check if installed
+./scripts/install-claude-hooks.sh --check
+
+# Uninstall hooks
+./scripts/install-claude-hooks.sh --uninstall
+
+# Preview changes without applying
+./scripts/install-claude-hooks.sh --dry-run
+```
+
+### Tool-to-Activity Mapping
+
+| Claude Code Tool | Dashboard Activity |
+|------------------|-------------------|
+| Read, Grep, Glob, LS | reading |
+| Edit, Write, MultiEdit, NotebookEdit | editing |
+| Bash | running |
+| Bash with `gh`/`git push`/`git pull` | github |
+| WebSearch, WebFetch | researching |
+| TodoWrite, plan | planning |
+| Stop, SessionEnd | idle |
+
+### How It Works
+
+1. Claude Code fires hook events (SessionStart, PreToolUse, PostToolUse, Stop, etc.)
+2. The hook script (`.cursor/hooks/claude-code-hook.cjs`) translates to Cursor format
+3. Events are forwarded to the existing `update-dashboard-status.py` pipeline
+4. The `claude-code` avatar updates in real-time on the dashboard
 
 ## Cloud Agent Status (F.R.I.D.A.Y. & Bumblebee)
 

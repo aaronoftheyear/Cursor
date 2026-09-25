@@ -8,7 +8,7 @@
     "dev": "vite",
     "build": "tsc && vite build",
     "preview": "vite preview",
-    "test": "node tests/cloudAgentPoller.test.cjs && node tests/hookLifecycle.test.cjs && node tests/layerOrdering.test.cjs && node tests/mapBounds.test.cjs && node tests/spawnGuard.test.cjs && node tests/spriteFrameOrder.test.cjs",
+    "test": "node tests/cloudAgentPoller.test.cjs && node tests/hookLifecycle.test.cjs && node tests/claudeCodeHook.test.cjs && node tests/layerOrdering.test.cjs && node tests/mapBounds.test.cjs && node tests/spawnGuard.test.cjs && node tests/spriteFrameOrder.test.cjs",
     "electron": "npm run build && electron .",
     "electron:dev": "concurrently \"vite\" \"wait-on http://localhost:5173 && electron .\""
   },
