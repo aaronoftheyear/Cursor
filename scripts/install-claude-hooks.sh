@@ -29,6 +29,8 @@ CLAUDE_SETTINGS="${CLAUDE_SETTINGS_PATH:-$HOME/.claude/settings.json}"
 
 # Marker to identify our hook group
 HOOK_MARKER="dashboard-status-hook"
+# Bump when hook behaviour changes (non-blocking forward, session registry, etc.)
+DASHBOARD_HOOK_VERSION=2
 
 show_help() {
   cat << 'EOF'
@@ -217,7 +219,59 @@ sys.exit(1)
 PYTHON_CHECK
 
     if [[ $check_result -eq 0 ]]; then
-      echo "✓ Claude Code hooks are installed"
+      version_ok=0
+      python3 - "$CLAUDE_SETTINGS" "$HOOK_SCRIPT" "$DASHBOARD_HOOK_VERSION" << 'PYTHON_VERSION' || version_ok=$?
+import json
+import re
+import sys
+
+settings_path = sys.argv[1]
+hook_script = sys.argv[2]
+required = int(sys.argv[3])
+
+with open(settings_path) as f:
+    data = json.load(f)
+
+hooks = data.get("hooks", {})
+found = 0
+references = False
+ver_re = re.compile(r"--dashboard-hook-version=(\d+)")
+
+for event_groups in hooks.values():
+    if not isinstance(event_groups, list):
+        continue
+    for group in event_groups:
+        if not isinstance(group, dict):
+            continue
+        group_hooks = group.get("hooks", [])
+        if not isinstance(group_hooks, list):
+            continue
+        for hook in group_hooks:
+            if not isinstance(hook, dict):
+                continue
+            cmd = hook.get("command", "")
+            if hook_script not in cmd:
+                continue
+            references = True
+            m = ver_re.search(cmd)
+            if m:
+                found = max(found, int(m.group(1)))
+            else:
+                found = max(found, 1)
+
+if not references:
+    sys.exit(1)
+if found < required:
+    sys.exit(2)
+sys.exit(0)
+PYTHON_VERSION
+
+      if [[ $version_ok -eq 2 ]]; then
+        echo "✗ Claude Code hooks are installed but outdated (need v$DASHBOARD_HOOK_VERSION)"
+        echo "  Re-run: ./scripts/install-claude-hooks.sh"
+        exit 1
+      fi
+      echo "✓ Claude Code hooks are installed (v$DASHBOARD_HOOK_VERSION)"
       exit 0
     else
       echo "✗ Claude Code hooks are not installed"
@@ -234,7 +288,7 @@ PYTHON_CHECK
     check_prerequisites
     node_path="$(find_node)"
     
-    new_settings=$(python3 - "$existing" "$HOOK_SCRIPT" "$node_path" "$HOOK_MARKER" << 'PYTHON_INSTALL'
+    new_settings=$(python3 - "$existing" "$HOOK_SCRIPT" "$node_path" "$HOOK_MARKER" "$DASHBOARD_HOOK_VERSION" << 'PYTHON_INSTALL'
 import json
 import sys
 
@@ -242,6 +296,7 @@ existing_json = sys.argv[1]
 hook_script = sys.argv[2]
 node_path = sys.argv[3]
 hook_marker = sys.argv[4]
+hook_version = int(sys.argv[5])
 
 try:
     data = json.loads(existing_json) if existing_json.strip() else {}
@@ -264,7 +319,7 @@ hook_events = [
     "SessionEnd",
 ]
 
-hook_command = f'"{node_path}" "{hook_script}"'
+hook_command = f'"{node_path}" "{hook_script}" --dashboard-hook-version={hook_version}'
 
 # Our hook group structure
 our_group = {

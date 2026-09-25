@@ -277,6 +277,39 @@ For a Grok-based desktop assistant, add these calls:
 
 The status file is written to `.dashboard/external-agents.json` and is not tracked by git.
 
+## Agent activity feed
+
+Detection is centralized in `server/agentActivity/`: every source emits the same **`AgentEvent`** shape and implements **`AgentActivityProvider`** (`start` / `stop`, emit events).
+
+| Source | Provider | Notes |
+|--------|----------|--------|
+| Claude Code hooks | `claude-hook` | Non-blocking hook → Python status pipeline; hooks win over log fallback |
+| Claude session JSONL | `claude-session-log` | Tails `~/.claude/projects/**/*.jsonl` when hooks are missing |
+The Vite dev server starts the session-log feed automatically (stops on dev server close). Run the feed standalone with:
+
+```bash
+node --import tsx scripts/run-activity-feed.mts
+```
+
+### Doctor
+
+Read-only checks (server up, hooks installed/current, settings JSON, session-log dir, `set-agent-status.sh`):
+
+```bash
+npm run doctor
+# or
+./scripts/agent-dashboard-doctor.sh
+```
+
+### Adding a provider
+
+1. Implement `AgentActivityProvider` in `server/agentActivity/providers/`.
+2. Map tool names with `server/agentActivity/toolMapping.ts` (or extend it).
+3. Register the provider in `ActivityFeed` (`server/agentActivity/activityFeed.ts`).
+4. Add fixture JSONL lines under `tests/fixtures/` and a small test in `tests/`.
+
+Attribution: session-log tailing and hook normalization borrow patterns from [pixel-agents](https://github.com/pixel-agents-hq/pixel-agents) (MIT); non-blocking hook forwarding follows [pixtuoid](https://github.com/IvanWng97/pixtuoid).
+
 ## Claude Code Integration
 
 The dashboard integrates with [Claude Code](https://claude.ai/code) (Anthropic's CLI) to show real-time status for the `claude-code` avatar. Claude Code events are translated to the same activity vocabulary as Cursor hooks, so the avatar walks to matching action spots.

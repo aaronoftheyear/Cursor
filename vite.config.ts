@@ -11,6 +11,7 @@ import {
   type ExternalAgents,
   type CloudAgentStatus,
 } from './server/liveStatusMerge'
+import { ActivityFeed } from './server/agentActivity/activityFeed'
 
 const CURSOR_STALE_MS = 300_000 // 5 minutes - self-healing for stuck agents
 const DEFAULT_AGENTS = ['jarvis', 'friday', 'bumblebee', 'claude-code'] as const
@@ -35,6 +36,13 @@ let cloudAgentCache: Map<string, CloudAgentStatus> = new Map()
 let cloudAgentByIdCache: Map<string, CloudAgentStatus> = new Map()
 let cloudPollTime = 0
 const CLOUD_POLL_INTERVAL_MS = 30_000
+
+let dashboardActivityFeed: ActivityFeed | null = null
+
+/** @internal Tests: feed must stay running after Vite configureServer returns. */
+export function getDashboardActivityFeedForTests(): ActivityFeed | null {
+  return dashboardActivityFeed
+}
 
 // Track last sent response for updatedAt comparison
 const updatedAtState = createUpdatedAtState()
@@ -293,9 +301,21 @@ export default defineConfig(({ mode }) => {
         name: 'dashboard-live-status',
         configureServer(server) {
           server.middlewares.use('/live-status.json', liveStatusMiddleware)
+          dashboardActivityFeed = new ActivityFeed({ projectRoot: process.cwd() })
+          dashboardActivityFeed.start()
+          server.httpServer?.once('close', () => {
+            dashboardActivityFeed?.stop()
+            dashboardActivityFeed = null
+          })
         },
         configurePreviewServer(server) {
           server.middlewares.use('/live-status.json', liveStatusMiddleware)
+          dashboardActivityFeed = new ActivityFeed({ projectRoot: process.cwd() })
+          dashboardActivityFeed.start()
+          server.httpServer?.once('close', () => {
+            dashboardActivityFeed?.stop()
+            dashboardActivityFeed = null
+          })
         },
       },
     ],

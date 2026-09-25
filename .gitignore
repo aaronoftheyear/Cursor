@@ -29,3 +29,4 @@ npm-debug.log*
 
 # Electron
 out/
+__pycache__/
