@@ -25,8 +25,15 @@ interface LiveStatus {
   agents: Record<string, AgentStatus>
 }
 
+interface ExternalAgentStatus extends AgentStatus {
+  updatedAt?: string
+  ttlSeconds?: number
+  expiresAt?: string
+  waitingOn?: string
+}
+
 interface ExternalAgents {
-  agents: Record<string, AgentStatus & { updatedAt?: string }>
+  agents: Record<string, ExternalAgentStatus>
 }
 
 interface AgentLinksConfig {
@@ -114,20 +121,60 @@ function healStaleAgents(live: LiveStatus): LiveStatus {
   return healed
 }
 
-function mergeExternalAgents(live: LiveStatus, external: ExternalAgents): LiveStatus {
+function mergeExternalAgents(
+  live: LiveStatus,
+  external: ExternalAgents,
+  cloudStatus: Map<string, CloudAgentStatus>
+): LiveStatus {
   const now = Date.now()
   const merged = { ...live, agents: { ...live.agents } }
 
   for (const [agentId, extStatus] of Object.entries(external.agents || {})) {
     if (!extStatus.updatedAt) continue
 
-    const updatedAt = new Date(extStatus.updatedAt).getTime()
-    const isStale = now - updatedAt > EXTERNAL_STALE_MS
+    // Check if status has expired using custom TTL (expiresAt) or default
+    let isStale = false
+    if (extStatus.expiresAt) {
+      const expiresAt = new Date(extStatus.expiresAt).getTime()
+      isStale = now > expiresAt
+    } else {
+      const updatedAt = new Date(extStatus.updatedAt).getTime()
+      isStale = now - updatedAt > EXTERNAL_STALE_MS
+    }
 
-    if (isStale) {
+    // Check if waiting-on cloud agent has finished
+    let waitingOnFinished = false
+    if (extStatus.waitingOn && !isStale) {
+      const waitingOnId = extStatus.waitingOn
+      // Check if it's a bc-ID reference in the cloud status
+      for (const [, cloudAgent] of cloudStatus) {
+        if (cloudAgent.cloudAgentId === waitingOnId || 
+            (cloudAgent.cloudAgentId && waitingOnId.toLowerCase().includes(cloudAgent.cloudAgentId.toLowerCase()))) {
+          if (cloudAgent.status === 'idle') {
+            waitingOnFinished = true
+          }
+          break
+        }
+      }
+      // Also check by name match in cloud agents
+      if (!waitingOnFinished) {
+        for (const [, cloudAgent] of cloudStatus) {
+          if (cloudAgent.detail?.toLowerCase().includes(waitingOnId.toLowerCase())) {
+            if (cloudAgent.status === 'idle') {
+              waitingOnFinished = true
+            }
+            break
+          }
+        }
+      }
+    }
+
+    if (isStale || waitingOnFinished) {
       merged.agents[agentId] = {
         status: 'idle',
-        detail: 'External agent idle (stale)',
+        detail: waitingOnFinished 
+          ? `Cloud agent finished: ${extStatus.waitingOn}`
+          : 'External agent idle (expired)',
         source: 'external',
       }
     } else {
@@ -287,9 +334,13 @@ function createLiveStatusMiddleware(cursorApiKey: string | undefined) {
 
     live = healStaleAgents(live)
 
-    let merged = mergeExternalAgents(live, external)
-
+    // Poll cloud agents first so we can use their status for waiting-on checks
     const cloudStatus = await pollCloudAgentsApi(linksConfig, cursorApiKey)
+
+    // Merge external agents with cloud status for waiting-on auto-clear
+    let merged = mergeExternalAgents(live, external, cloudStatus)
+
+    // Finally merge cloud agent status
     merged = mergeCloudAgents(merged, cloudStatus)
 
     res.statusCode = 200

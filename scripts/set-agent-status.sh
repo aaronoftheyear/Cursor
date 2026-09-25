@@ -6,13 +6,18 @@
 # Usage: ./scripts/set-agent-status.sh <agent-id> <status> [options]
 #
 # Arguments:
-#   agent-id    The agent identifier (e.g. grokbot, gemini, apple-intelligence)
+#   agent-id    The agent identifier (e.g. metabee, grokbot, gemini, apple-intelligence)
 #   status      One of: idle, working, busy
 #
 # Options:
 #   -a, --activity <activity>   Activity type (required when status is working/busy)
 #   -d, --depth <depth>         Activity depth: brief (stay at desk) or deep (walk to spot)
 #   -m, --message <text>        Detail message shown in sidebar
+#   -t, --ttl <duration>        Time-to-live before auto-expiring to idle (default: 2m, max: 2h)
+#                               Formats: 120 (seconds), 5m (minutes), 1h (hours)
+#   --waiting-on <bc-id|name>   Cloud agent ID (bc-...) or name to wait on.
+#                               Status auto-clears when that cloud agent finishes.
+#                               Implies activity='waiting' if not set.
 #   -h, --help                  Show this help message
 #
 # Activities (same as Cursor hooks):
@@ -23,6 +28,7 @@
 #   running       Running shell commands, executing tasks
 #   researching   Web research, searching online (walks to research spot when deep)
 #   github        GitHub operations, git push/pull/fetch/clone, gh CLI
+#   waiting       Waiting for another agent or process
 #
 # Depth:
 #   brief       Stay at computer/desk (default)
@@ -38,11 +44,17 @@
 #   # Grok is using GitHub (walks to GitHub spot)
 #   ./scripts/set-agent-status.sh grokbot working -a github -d deep -m "Pushing changes"
 #
+#   # Metabee is waiting on a cloud agent (with 1 hour TTL)
+#   ./scripts/set-agent-status.sh metabee working -a waiting --waiting-on "bc-abc123" -t 1h -m "Waiting on cloud agent"
+#
+#   # Metabee is waiting (auto-clears when cloud agent "Connect Claude Code" finishes)
+#   ./scripts/set-agent-status.sh metabee working --waiting-on "Connect Claude Code" -t 1h
+#
 #   # Grok is idle
 #   ./scripts/set-agent-status.sh grokbot idle
 #
 # The status persists until overwritten or it expires (2 minutes of no updates
-# causes automatic fallback to idle).
+# causes automatic fallback to idle, or custom TTL if specified).
 
 set -euo pipefail
 
@@ -52,8 +64,55 @@ STATUS_FILE="$PROJECT_ROOT/.dashboard/external-agents.json"
 
 # Valid values (must match src/liveStatus.ts)
 VALID_STATUSES="idle working busy"
-VALID_ACTIVITIES="planning thinking reading editing running researching github"
+VALID_ACTIVITIES="planning thinking reading editing running researching github waiting"
 VALID_DEPTHS="brief deep"
+
+# TTL defaults and limits
+DEFAULT_TTL_SECONDS=120  # 2 minutes
+MAX_TTL_SECONDS=7200     # 2 hours
+
+# Parse duration string to seconds (e.g., 120, 5m, 1h, 2h30m)
+parse_duration() {
+  local input="$1"
+  local total=0
+  
+  # Pure number = seconds
+  if [[ "$input" =~ ^[0-9]+$ ]]; then
+    echo "$input"
+    return 0
+  fi
+  
+  # Parse hours (h), minutes (m), seconds (s)
+  local remaining="$input"
+  
+  # Extract hours
+  if [[ "$remaining" =~ ([0-9]+)h ]]; then
+    total=$((total + ${BASH_REMATCH[1]} * 3600))
+    remaining="${remaining//${BASH_REMATCH[0]}/}"
+  fi
+  
+  # Extract minutes
+  if [[ "$remaining" =~ ([0-9]+)m ]]; then
+    total=$((total + ${BASH_REMATCH[1]} * 60))
+    remaining="${remaining//${BASH_REMATCH[0]}/}"
+  fi
+  
+  # Extract seconds
+  if [[ "$remaining" =~ ([0-9]+)s ]]; then
+    total=$((total + ${BASH_REMATCH[1]}))
+    remaining="${remaining//${BASH_REMATCH[0]}/}"
+  fi
+  
+  # Check for leftover invalid characters
+  remaining="${remaining//[[:space:]]/}"
+  if [[ -n "$remaining" ]]; then
+    echo "0"  # Invalid format
+    return 1
+  fi
+  
+  echo "$total"
+  return 0
+}
 
 show_help() {
   cat << 'EOF'
@@ -70,6 +129,12 @@ Options:
   -a, --activity <activity>   Activity type (required when status is working/busy)
   -d, --depth <depth>         Activity depth: brief or deep (default: brief)
   -m, --message <text>        Detail message shown in sidebar
+  -t, --ttl <duration>        Time-to-live before auto-expiring to idle
+                              Default: 2m, Max: 2h
+                              Formats: 120 (seconds), 5m, 1h, 2h30m
+  --waiting-on <bc-id|name>   Cloud agent ID (bc-...) or name to wait on.
+                              Status auto-clears when that agent finishes.
+                              Implies activity='waiting' if not set.
   -h, --help                  Show this help message
 
 Activities (same as Cursor hooks, mapped to action spots):
@@ -99,6 +164,9 @@ Activities (same as Cursor hooks, mapped to action spots):
                 → brief: stays at computer
                 → deep: walks to GitHub spot
 
+  waiting       Waiting for another agent or process
+                → always stays at computer
+
 Depth:
   brief       Stay at computer/desk (default)
   deep        Walk to activity-specific spot (planning board, bookshelf, etc.)
@@ -122,10 +190,20 @@ Examples:
   # Grok is planning something
   ./scripts/set-agent-status.sh grokbot working -a planning -d deep -m "Designing workflow"
 
+  # Metabee is waiting on a cloud agent (with 1 hour TTL)
+  ./scripts/set-agent-status.sh metabee working -a waiting --waiting-on "bc-abc123" -t 1h -m "Waiting on FRIDAY"
+
+  # Metabee waiting (auto-clears when cloud agent "Connect Claude Code" finishes)
+  ./scripts/set-agent-status.sh metabee working --waiting-on "Connect Claude Code" -t 1h
+
+  # Custom TTL of 30 minutes
+  ./scripts/set-agent-status.sh grokbot working -a running -t 30m -m "Running long process"
+
   # Grok is idle
   ./scripts/set-agent-status.sh grokbot idle
 
-Note: Status expires after 2 minutes of no updates (falls back to idle).
+Note: Status expires after TTL (default 2 minutes, max 2 hours). When --waiting-on
+      is set, status also auto-clears when the referenced cloud agent finishes.
 EOF
 }
 
@@ -169,6 +247,8 @@ shift 2
 ACTIVITY=""
 DEPTH="brief"
 MESSAGE=""
+TTL_SECONDS=""
+WAITING_ON=""
 
 # Parse options
 while [[ $# -gt 0 ]]; do
@@ -188,6 +268,22 @@ while [[ $# -gt 0 ]]; do
       MESSAGE="$2"
       shift 2
       ;;
+    -t|--ttl)
+      [[ $# -lt 2 ]] && die "--ttl requires an argument"
+      TTL_SECONDS=$(parse_duration "$2")
+      if [[ "$TTL_SECONDS" == "0" && "$2" != "0" ]]; then
+        die "Invalid TTL format: $2 (use seconds, 5m, 1h, or 2h30m)"
+      fi
+      if [[ "$TTL_SECONDS" -gt "$MAX_TTL_SECONDS" ]]; then
+        die "TTL exceeds maximum of 2 hours (7200 seconds): $2"
+      fi
+      shift 2
+      ;;
+    --waiting-on)
+      [[ $# -lt 2 ]] && die "--waiting-on requires an argument"
+      WAITING_ON="$2"
+      shift 2
+      ;;
     -h|--help)
       show_help
       exit 0
@@ -201,6 +297,16 @@ done
 # Validate status
 validate_in_list "$STATUS" "$VALID_STATUSES" "status"
 
+# If --waiting-on is set, default activity to 'waiting' and status to 'working'
+if [[ -n "$WAITING_ON" ]]; then
+  if [[ -z "$ACTIVITY" ]]; then
+    ACTIVITY="waiting"
+  fi
+  if [[ "$STATUS" == "idle" ]]; then
+    STATUS="working"
+  fi
+fi
+
 # Validate activity (required for working/busy)
 if [[ "$STATUS" == "working" || "$STATUS" == "busy" ]]; then
   if [[ -z "$ACTIVITY" ]]; then
@@ -213,6 +319,11 @@ fi
 
 # Validate depth
 validate_in_list "$DEPTH" "$VALID_DEPTHS" "depth"
+
+# Set default TTL if not specified
+if [[ -z "$TTL_SECONDS" ]]; then
+  TTL_SECONDS="$DEFAULT_TTL_SECONDS"
+fi
 
 # Ensure directory exists
 mkdir -p "$(dirname "$STATUS_FILE")"
@@ -228,9 +339,10 @@ else
 fi
 
 # Use Python to merge JSON (available on macOS)
-python3 - "$EXISTING" "$AGENT_ID" "$STATUS" "$ACTIVITY" "$DEPTH" "$MESSAGE" "$TIMESTAMP" "$STATUS_FILE" << 'PYTHON_SCRIPT'
+python3 - "$EXISTING" "$AGENT_ID" "$STATUS" "$ACTIVITY" "$DEPTH" "$MESSAGE" "$TIMESTAMP" "$STATUS_FILE" "$TTL_SECONDS" "$WAITING_ON" << 'PYTHON_SCRIPT'
 import json
 import sys
+from datetime import datetime, timezone, timedelta
 
 existing_json = sys.argv[1]
 agent_id = sys.argv[2]
@@ -240,6 +352,8 @@ depth = sys.argv[5]
 message = sys.argv[6] if sys.argv[6] else None
 timestamp = sys.argv[7]
 output_file = sys.argv[8]
+ttl_seconds = int(sys.argv[9]) if sys.argv[9] else 120
+waiting_on = sys.argv[10] if len(sys.argv) > 10 and sys.argv[10] else None
 
 try:
     data = json.loads(existing_json)
@@ -249,10 +363,16 @@ except json.JSONDecodeError:
 if "agents" not in data:
     data["agents"] = {}
 
+# Calculate expiry time
+now = datetime.now(timezone.utc)
+expires_at = now + timedelta(seconds=ttl_seconds)
+
 entry = {
     "status": status,
     "source": "external",
-    "updatedAt": timestamp
+    "updatedAt": timestamp,
+    "ttlSeconds": ttl_seconds,
+    "expiresAt": expires_at.strftime("%Y-%m-%dT%H:%M:%SZ")
 }
 
 if message:
@@ -261,6 +381,9 @@ if message:
 if activity:
     entry["activity"] = activity
     entry["activityDepth"] = depth
+
+if waiting_on:
+    entry["waitingOn"] = waiting_on
 
 data["agents"][agent_id] = entry
 
@@ -272,6 +395,10 @@ with open(output_file, "w") as f:
 parts = [f"✓ Set {agent_id} to {status}"]
 if activity:
     parts.append(f"({activity}, {depth})")
+if waiting_on:
+    parts.append(f"[waiting on: {waiting_on}]")
+if ttl_seconds != 120:
+    parts.append(f"[TTL: {ttl_seconds}s]")
 if message:
     parts.append(f": {message}")
 print(" ".join(parts))

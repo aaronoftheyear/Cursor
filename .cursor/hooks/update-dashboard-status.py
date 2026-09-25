@@ -17,7 +17,7 @@ PUBLIC_MIRROR = PROJECT_ROOT / "public" / "live-status.json"
 LINKS_FILE = PROJECT_ROOT / "public" / "assets" / "agent-links.json"
 SEEN_EVENTS_FILE = STATUS_DIR / "seen-events.json"
 
-DEFAULT_AGENTS = ("jarvis", "friday", "bumblebee")
+DEFAULT_AGENTS = ("jarvis", "friday", "bumblebee", "claude-code")
 
 # Self-healing timeout: reset working agents to idle if no events for this long
 STALE_TIMEOUT_SECONDS = 300  # 5 minutes
@@ -145,29 +145,45 @@ def load_agent_link_specs() -> dict[str, dict[str, list[str]]]:
         "markers": [],
         "workspaces": [],
         "agent_names": [],
+        "source": "cursor",
     }
     out: dict[str, dict[str, list[str]]] = {
         agent_id: dict(empty) for agent_id in DEFAULT_AGENTS
     }
+    out["claude-code"]["source"] = "claude-code"
     if not LINKS_FILE.is_file():
         return out
     try:
         data = json.loads(LINKS_FILE.read_text(encoding="utf-8"))
         for agent_id, spec in (data.get("agents") or {}).items():
             cursor = spec.get("cursor") if isinstance(spec, dict) else None
-            if not isinstance(cursor, dict):
-                continue
-            out[agent_id] = {
-                "markers": [
-                    str(m).lower() for m in cursor.get("payloadContains") or []
-                ],
-                "workspaces": [
-                    str(w).lower() for w in cursor.get("workspaceContains") or []
-                ],
-                "agent_names": [
-                    str(n).lower() for n in cursor.get("agentNameContains") or []
-                ],
-            }
+            if isinstance(cursor, dict):
+                out[agent_id] = {
+                    "markers": [
+                        str(m).lower() for m in cursor.get("payloadContains") or []
+                    ],
+                    "workspaces": [
+                        str(w).lower() for w in cursor.get("workspaceContains") or []
+                    ],
+                    "agent_names": [
+                        str(n).lower() for n in cursor.get("agentNameContains") or []
+                    ],
+                    "source": "cursor",
+                }
+            claude = spec.get("claude") if isinstance(spec, dict) else None
+            if isinstance(claude, dict):
+                out[agent_id] = {
+                    "markers": [
+                        str(m).lower() for m in claude.get("payloadContains") or []
+                    ],
+                    "workspaces": [
+                        str(w).lower() for w in claude.get("workspaceContains") or []
+                    ],
+                    "agent_names": [
+                        str(n).lower() for n in claude.get("agentNameContains") or []
+                    ],
+                    "source": "claude-code",
+                }
     except (json.JSONDecodeError, OSError):
         pass
     return out
@@ -321,6 +337,8 @@ def resolve_matched_agents(hook: dict, specs: dict[str, dict[str, list[str]]]) -
 
 
 def is_relevant_session(hook: dict, specs: dict[str, dict[str, list[str]]]) -> bool:
+    if is_claude_code_session(hook):
+        return True
     if resolve_matched_agents(hook, specs):
         return True
     return is_dashboard_workspace(hook)
@@ -331,12 +349,18 @@ def default_agent_status(agent_id: str) -> dict:
         "jarvis": "Waiting for Cursor session",
         "friday": "Waiting for F.R.I.D.A.Y. session",
         "bumblebee": "Waiting for Bumblebee session",
+        "claude-code": "Waiting for Claude Code session",
     }
     return {
         "status": "idle",
-        "source": "cursor",
+        "source": "claude-code" if agent_id == "claude-code" else "cursor",
         "detail": labels.get(agent_id, "Idle"),
     }
+
+
+def is_claude_code_session(hook: dict) -> bool:
+    """Check if this is a Claude Code session (not Cursor)."""
+    return hook.get("claude_code") is True or hook.get("source") == "claude-code"
 
 
 def load_state() -> dict:
@@ -372,11 +396,12 @@ def set_agent(
     detail: str,
     activity: str | None = None,
     activity_depth: str | None = "brief",
+    source: str | None = None,
 ) -> None:
     agents = state.setdefault("agents", {})
     entry: dict = {
         "status": status,
-        "source": "cursor",
+        "source": source or ("claude-code" if agent_id == "claude-code" else "cursor"),
         "detail": detail,
     }
     if activity and activity in ACTIVITY_LABELS:
@@ -484,7 +509,7 @@ def activity_from_hook(event: str, hook: dict) -> tuple[str, str]:
         return "running", ACTIVITY_LABELS["running"]
 
     if event in ("preToolUse", "postToolUse"):
-        if tool in ("shell",) or tool.endswith("shell"):
+        if tool in ("shell", "bash") or tool.endswith("shell"):
             cmd = hook.get("command") or hook.get("input", {}).get("command") or ""
             if is_github_shell_command(cmd):
                 return "github", ACTIVITY_LABELS["github"]
@@ -533,6 +558,9 @@ def activity_from_hook(event: str, hook: dict) -> tuple[str, str]:
 
 
 def target_agents(hook: dict, specs: dict[str, dict[str, list[str]]]) -> list[str]:
+    # Claude Code sessions always target claude-code agent
+    if is_claude_code_session(hook):
+        return ["claude-code"]
     matched = resolve_matched_agents(hook, specs)
     if matched:
         return matched
@@ -548,6 +576,9 @@ def detail_for_agent(agent_id: str, activity: str, detail: str) -> str:
     if agent_id == "bumblebee":
         label = ACTIVITY_LABELS.get(activity, detail)
         return f"Cloud worker — {label}"
+    if agent_id == "claude-code":
+        label = ACTIVITY_LABELS.get(activity, detail)
+        return f"Claude Code — {label}"
     return detail
 
 
