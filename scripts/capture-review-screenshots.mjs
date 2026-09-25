@@ -24,7 +24,7 @@ async function ensurePlaywright() {
 }
 
 function startDevServer() {
-  const child = spawn('npm', ['run', 'dev', '--', '--host', '127.0.0.1', '--port', '5173'], {
+  const child = spawn('npm', ['run', 'dev', '--', '--host', '127.0.0.1', '--port', '5173', '--force'], {
     cwd: root,
     stdio: 'pipe',
     env: { ...process.env, BROWSER: 'none' },
