@@ -52,7 +52,8 @@ export class LayaClient {
   private config: LayaConfig;
   private available: boolean = false;
   private lastHealthCheck: number = 0;
-  private healthCheckInterval: number = 30000; // 30 seconds
+  private healthCheckInterval: number = 30000; // 30 seconds when online
+  private offlineCheckInterval: number = 120000; // 2 minutes when offline
   
   constructor(config: Partial<LayaConfig> = {}) {
     this.config = { ...DEFAULT_CONFIG, ...config };
@@ -66,22 +67,26 @@ export class LayaClient {
     }
     
     try {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 2000);
       const response = await fetch(`${this.config.endpoint}/healthz`, {
         method: 'GET',
-        signal: AbortSignal.timeout(2000),
+        signal: controller.signal,
       });
+      clearTimeout(timeoutId);
       this.available = response.ok;
       this.lastHealthCheck = Date.now();
       return this.available;
     } catch {
       this.available = false;
+      this.lastHealthCheck = Date.now();
       return false;
     }
   }
   
   isAvailable(): boolean {
-    // Re-check if stale
-    if (Date.now() - this.lastHealthCheck > this.healthCheckInterval) {
+    const interval = this.available ? this.healthCheckInterval : this.offlineCheckInterval;
+    if (Date.now() - this.lastHealthCheck > interval) {
       this.checkHealth();
     }
     return this.available;

@@ -1,0 +1,160 @@
+{
+  "version": 1,
+  "spots": [
+    {
+      "x": 6,
+      "y": 6,
+      "kind": "spawn_cursor_grunt",
+      "group": "cursor",
+      "facing": "down"
+    },
+    {
+      "x": 12,
+      "y": 15,
+      "kind": "lookup_cursor",
+      "group": "main",
+      "facing": "up",
+      "excludeGroups": [
+        "cursor"
+      ]
+    },
+    {
+      "x": 17,
+      "y": 15,
+      "kind": "laya_workbench",
+      "group": "main",
+      "facing": "down",
+      "allowedAgentIds": [
+        "laya"
+      ]
+    },
+    {
+      "x": 23,
+      "y": 15,
+      "kind": "lookup_claude",
+      "group": "main",
+      "facing": "up",
+      "excludeGroups": [
+        "claude"
+      ]
+    },
+    {
+      "x": 4,
+      "y": 17,
+      "kind": "idle_relax",
+      "group": "main",
+      "facing": "down"
+    },
+    {
+      "x": 5,
+      "y": 17,
+      "kind": "idle_relax",
+      "group": "main",
+      "facing": "down"
+    },
+    {
+      "x": 17,
+      "y": 17,
+      "kind": "laya_chat",
+      "group": "main",
+      "facing": "up"
+    },
+    {
+      "x": 2,
+      "y": 18,
+      "kind": "idle_relax",
+      "group": "main",
+      "facing": "right"
+    },
+    {
+      "x": 27,
+      "y": 19,
+      "kind": "idle_relax",
+      "group": "main",
+      "facing": "down"
+    },
+    {
+      "x": 28,
+      "y": 19,
+      "kind": "idle_relax",
+      "group": "main",
+      "facing": "down"
+    },
+    {
+      "x": 8,
+      "y": 20,
+      "kind": "main_workstation",
+      "group": "main",
+      "facing": "right",
+      "excludeGroups": [
+        "cursor",
+        "claude"
+      ]
+    },
+    {
+      "x": 10,
+      "y": 20,
+      "kind": "main_workstation",
+      "group": "main",
+      "facing": "right",
+      "excludeGroups": [
+        "cursor",
+        "claude"
+      ]
+    },
+    {
+      "x": 12,
+      "y": 20,
+      "kind": "main_workstation",
+      "group": "main",
+      "facing": "right",
+      "excludeGroups": [
+        "cursor",
+        "claude"
+      ]
+    },
+    {
+      "x": 16,
+      "y": 20,
+      "kind": "mac_studio",
+      "group": "main",
+      "facing": "right",
+      "excludeGroups": [
+        "cursor",
+        "claude"
+      ]
+    },
+    {
+      "x": 21,
+      "y": 20,
+      "kind": "macbook_pro",
+      "group": "main",
+      "facing": "left",
+      "excludeGroups": [
+        "cursor",
+        "claude"
+      ]
+    },
+    {
+      "x": 18,
+      "y": 6,
+      "kind": "github",
+      "group": "claude",
+      "facing": "up"
+    },
+    {
+      "x": 19,
+      "y": 6,
+      "kind": "github",
+      "group": "claude",
+      "facing": "up"
+    },
+    {
+      "x": 20,
+      "y": 6,
+      "kind": "github",
+      "group": "claude",
+      "facing": "up"
+    }
+  ]
+}

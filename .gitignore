@@ -14,6 +14,15 @@ dist/
 .DS_Store
 Thumbs.db
 
+# Environment variables (API keys)
+.env
+.env.local
+.env.*.local
+
+# Live Cursor ↔ dashboard sync (hooks write here)
+.dashboard/
+public/live-status.json
+
 # Logs
 *.log
 npm-debug.log*

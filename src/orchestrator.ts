@@ -74,7 +74,8 @@ const AGENT_DESCRIPTIONS: Record<string, string> = {
   'friday': 'F.R.I.D.A.Y. - Cloud troubleshooting coordinator. Manages cloud agents for CI/CD, infrastructure, monitoring, and incident response.',
   'bumblebee': 'Bumblebee - Cloud worker subagent. Handles log analysis, automated fixes, test execution, and CI tasks.',
   // Standalone agents
-  'cursor': 'AI-powered code editor. Best for coding tasks, refactoring, IDE integrations, and code completion.',
+  'cursor': 'Cursor Grunt. Best for coding tasks, refactoring, IDE integrations, and code completion.',
+  'cursor-grunt': 'Second Cursor grunt. Handles file edits, refactors, and local coding tasks under J.A.R.V.I.S.',
   'grokbot': 'X/Twitter AI with real-time knowledge. Best for current events, social trends, and witty responses.',
   'claude': 'General AI assistant. Excellent for analysis, writing, research, and thoughtful conversations.',
   'claude-cowork': 'Collaborative AI for team workflows. Specialized in multi-agent coordination and handoffs.',

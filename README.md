@@ -138,6 +138,160 @@ electron/
 
 Edit `ROUTING_RULES` in `src/orchestrator.ts` to adjust keyword weights and agent assignments.
 
+## External Agent Status
+
+The dashboard can display live status for external agents (non-Cursor bots, desktop assistants, etc.) alongside Cursor-integrated agents. External agents use the **same activity vocabulary** as Cursor hooks, so they walk to matching action spots in the Main Space.
+
+### Setting External Agent Status
+
+Use the CLI script to report status from any shell command:
+
+```bash
+./scripts/set-agent-status.sh <agent-id> <status> [options]
+```
+
+**Arguments:**
+| Argument | Required | Description |
+|----------|----------|-------------|
+| `agent-id` | Yes | Agent identifier (e.g. `grokbot`, `gemini`, `apple-intelligence`) |
+| `status` | Yes | One of: `idle`, `working`, `busy` |
+
+**Options:**
+| Option | Description |
+|--------|-------------|
+| `-a, --activity <activity>` | Activity type (required when status is working/busy) |
+| `-d, --depth <depth>` | Activity depth: `brief` (stay at desk) or `deep` (walk to spot) |
+| `-m, --message <text>` | Detail message shown in sidebar |
+| `-h, --help` | Show help with all options |
+
+### Activities (same as Cursor hooks)
+
+These map to action spots in the game world:
+
+| Activity | Description | Brief | Deep |
+|----------|-------------|-------|------|
+| `planning` | Planning, architecting, designing | Stays at computer | Walks to planning board |
+| `thinking` | Thinking, reasoning, processing | Stays at computer | Walks to thinking spot |
+| `reading` | Reading files, documentation | Stays at computer | Walks to bookshelf |
+| `editing` | Editing files, coding | Stays at computer | Stays at computer |
+| `running` | Running shell commands | Stays at computer | Stays at computer |
+| `researching` | Web research, online search | Stays at computer | Walks to research TV/spot |
+| `github` | GitHub ops, git push/pull/clone, gh CLI | Stays at computer | Walks to GitHub spot |
+
+### Examples
+
+```bash
+# Grok is reading files (stays at computer)
+./scripts/set-agent-status.sh grokbot working -a reading -m "Reading documentation"
+
+# Grok is researching online (walks to research spot)
+./scripts/set-agent-status.sh grokbot working -a researching -d deep -m "Searching Twitter trends"
+
+# Grok is deeply thinking (walks to thinking spot)
+./scripts/set-agent-status.sh grokbot working -a thinking -d deep
+
+# Grok is running a command
+./scripts/set-agent-status.sh grokbot working -a running -m "Fetching API data"
+
+# Grok is using GitHub (walks to GitHub spot)
+./scripts/set-agent-status.sh grokbot working -a github -d deep -m "Pushing to repo"
+
+# Grok is planning something (walks to planning board)
+./scripts/set-agent-status.sh grokbot working -a planning -d deep -m "Designing workflow"
+
+# Grok is idle
+./scripts/set-agent-status.sh grokbot idle
+```
+
+### How It Works
+
+1. The script writes to `.dashboard/external-agents.json`
+2. The Vite dev server merges this with Cursor hook status when serving `/live-status.json`
+3. External agent status takes precedence over default idle state
+4. The engine reads `activity` and `activityDepth` to pick the correct action spot
+5. **Staleness:** If no update is received for 2 minutes, the agent reverts to idle
+
+### Desktop Assistant Integration
+
+For a Grok-based desktop assistant, add these calls:
+
+```bash
+# When starting web research
+./scripts/set-agent-status.sh grokbot working -a researching -d deep -m "Researching: $QUERY"
+
+# When reading files/docs
+./scripts/set-agent-status.sh grokbot working -a reading -m "Reading: $FILE"
+
+# When thinking deeply
+./scripts/set-agent-status.sh grokbot working -a thinking -d deep
+
+# When running a command
+./scripts/set-agent-status.sh grokbot working -a running -m "Running: $CMD"
+
+# When using GitHub
+./scripts/set-agent-status.sh grokbot working -a github -d deep -m "Pushing: $BRANCH"
+
+# When done
+./scripts/set-agent-status.sh grokbot idle
+```
+
+The status file is written to `.dashboard/external-agents.json` and is not tracked by git.
+
+## Cloud Agent Status (F.R.I.D.A.Y. & Bumblebee)
+
+F.R.I.D.A.Y. (cloud coordinator) and Bumblebee (cloud worker) run as Cursor cloud/background agents, so local Cursor hooks never fire for them. The dashboard includes a server-side poller that queries Cursor's Cloud Agents API to show their live status.
+
+### Setup
+
+1. **Get an API key** from [cursor.com/dashboard → API Keys](https://cursor.com/dashboard)
+2. **Create `.env.local`** in the project root:
+   ```bash
+   cp .env.local.example .env.local
+   ```
+3. **Add your key** to `.env.local`:
+   ```
+   CURSOR_API_KEY=crsr_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+   ```
+4. **Restart the dev server** to pick up the new environment variable
+
+### How It Works
+
+1. The Vite dev server polls `https://api.cursor.com/v1/agents` every 30 seconds
+2. Cloud agents are matched to avatars using `cloud.agentNameContains` rules in `public/assets/agent-links.json`
+3. Run status is mapped: `RUNNING`/`CREATING` → working, `FINISHED`/`ERROR`/etc → idle
+4. Cloud status is merged with local hook status (local hooks take priority if both are active)
+
+### Matching Rules
+
+Edit `public/assets/agent-links.json` to customize which cloud agents map to which avatars:
+
+```json
+{
+  "friday": {
+    "cloud": {
+      "agentNameContains": ["friday", "f.r.i.d.a.y", "cloud coordinator"]
+    }
+  },
+  "bumblebee": {
+    "cloud": {
+      "agentNameContains": ["bumblebee", "cloud-worker", "background agent"]
+    }
+  }
+}
+```
+
+### Graceful Degradation
+
+When no `CURSOR_API_KEY` is set, cloud agent polling is silently disabled. The dashboard continues to work for local agents (J.A.R.V.I.S.) and external agents (Grok).
+
+## Status Self-Healing
+
+The dashboard automatically recovers from stuck agent statuses:
+
+- **Stale timeout**: If an agent is marked "working" but no hook events arrive for 5 minutes, it resets to idle
+- **Session reconciliation**: If `agentSessions` count is 0 but status is "working", the agent resets to idle
+- **Dedupe protection**: In the Dashboard workspace, both project hooks and global hooks run—the script deduplicates to count each event only once
+
 ## License
 
 MIT
