@@ -237,8 +237,11 @@ export class GameEngine {
       return this.findNearestWalkableFootTile(agent, preferred);
     }
     
-    // No spawn point defined - find any walkable tile (never use random pixels)
-    const walkable = this.getAllWalkableTiles(agent);
+    // No spawn point defined - prefer walkable tile in agent's room, fall back to any walkable
+    let walkable = this.getWalkableTilesInRoom(agent);
+    if (walkable.length === 0) {
+      walkable = this.getAllWalkableTiles(agent);
+    }
     if (walkable.length > 0) {
       const idx = Math.floor(Math.random() * walkable.length);
       const tile = walkable[idx];

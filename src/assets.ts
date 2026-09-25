@@ -271,11 +271,11 @@ class AssetLoader {
 export const assetLoader = new AssetLoader();
 
 /**
- * 144×32 strip [D-idle][D-w1][D-w2][U…][L…] — same semantics as 4×4 grid without na column.
- * Cols 1–4 map to strip indices 0,1,2 (na omitted).
+ * 144×32 strip [D-w1][D-idle][D-w2][U…][L…] — standard frame order.
+ * Each direction triplet: walk1, idle, walk2 (idle in position 1).
  */
-const STRIP_COL_IDLE = 0;
-const STRIP_COL_WALK1 = 1;
+const STRIP_COL_WALK1 = 0;
+const STRIP_COL_IDLE = 1;
 const STRIP_COL_WALK2 = 2;
 const STRIP_WALK_COLS = [
   STRIP_COL_WALK1,

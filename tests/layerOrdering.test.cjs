@@ -19,6 +19,7 @@
 const assert = require('assert');
 const { execSync } = require('child_process');
 const path = require('path');
+const fs = require('fs');
 
 console.log('\n=== Layer Ordering Tests ===\n');
 
@@ -38,12 +39,15 @@ function test(name, fn) {
 }
 
 // Import the real renderQueue module using tsx
-let renderQueue;
+let LAYER_WALKOVER, LAYER_MID, LAYER_AGENT, LAYER_WALLS_FRONT;
+let buildSortedRenderQueue, sortRenderQueue;
+
 try {
   const tsxPath = path.resolve(__dirname, '../node_modules/.bin/tsx');
   const modulePath = path.resolve(__dirname, '../src/renderQueue.ts');
   
-  const code = `
+  // Get constants
+  const constCode = `
     const m = require('${modulePath.replace(/\\/g, '\\\\')}');
     console.log(JSON.stringify({
       LAYER_WALKOVER: m.LAYER_WALKOVER,
@@ -53,12 +57,69 @@ try {
     }));
   `;
   
-  const result = execSync(`"${tsxPath}" -e "${code.replace(/"/g, '\\"').replace(/\n/g, ' ')}"`, {
+  const constResult = execSync(`"${tsxPath}" -e "${constCode.replace(/"/g, '\\"').replace(/\n/g, ' ')}"`, {
     encoding: 'utf-8',
     cwd: path.resolve(__dirname, '..'),
   });
   
-  renderQueue = JSON.parse(result.trim());
+  const constants = JSON.parse(constResult.trim());
+  LAYER_WALKOVER = constants.LAYER_WALKOVER;
+  LAYER_MID = constants.LAYER_MID;
+  LAYER_AGENT = constants.LAYER_AGENT;
+  LAYER_WALLS_FRONT = constants.LAYER_WALLS_FRONT;
+  
+  // Create wrapper functions that call the real module
+  buildSortedRenderQueue = (agents, walkoverTiles, midTiles, wallsFrontTiles) => {
+    const testCode = `
+      const m = require('${modulePath.replace(/\\/g, '\\\\')}');
+      const agents = ${JSON.stringify(agents.map(a => ({ id: a.id, feetY: a.feetY })))};
+      const walkover = ${JSON.stringify(walkoverTiles.map(t => ({ coord: t.coord, sortY: t.sortY })))};
+      const mid = ${JSON.stringify(midTiles.map(t => ({ coord: t.coord, sortY: t.sortY })))};
+      const wallsFront = ${JSON.stringify(wallsFrontTiles.map(t => ({ coord: t.coord, sortY: t.sortY })))};
+      
+      const agentInfos = agents.map(a => ({
+        id: a.id,
+        feetY: a.feetY,
+        drawShadow: () => {},
+        drawAgent: () => {},
+      }));
+      const walkoverInfos = walkover.map(t => ({
+        coord: t.coord,
+        sortY: t.sortY,
+        draw: () => {},
+      }));
+      const midInfos = mid.map(t => ({
+        coord: t.coord,
+        sortY: t.sortY,
+        draw: () => {},
+      }));
+      const wallsFrontInfos = wallsFront.map(t => ({
+        coord: t.coord,
+        sortY: t.sortY,
+        draw: () => {},
+      }));
+      
+      const queue = m.buildSortedRenderQueue(agentInfos, walkoverInfos, midInfos, wallsFrontInfos);
+      const result = queue.map(item => ({
+        sortY: item.sortY,
+        layer: item.layer,
+        name: item.layer === m.LAYER_AGENT ? agents.find(a => a.feetY === item.sortY)?.id || 'agent' :
+              item.layer === m.LAYER_WALKOVER ? 'walkover-' + walkover.find(t => t.sortY === item.sortY)?.coord.x + ',' + walkover.find(t => t.sortY === item.sortY)?.coord.y :
+              item.layer === m.LAYER_MID ? 'mid-' + mid.find(t => t.sortY === item.sortY)?.coord.x + ',' + mid.find(t => t.sortY === item.sortY)?.coord.y :
+              'walls-front-' + wallsFront.find(t => t.sortY === item.sortY)?.coord.x + ',' + wallsFront.find(t => t.sortY === item.sortY)?.coord.y,
+      }));
+      console.log(JSON.stringify(result));
+    `;
+    
+    const result = execSync(`"${tsxPath}" -e "${testCode.replace(/"/g, '\\"').replace(/\n/g, ' ')}"`, {
+      encoding: 'utf-8',
+      cwd: path.resolve(__dirname, '..'),
+    });
+    
+    return JSON.parse(result.trim());
+  };
+  
+  console.log('✓ Successfully imported real renderQueue module\n');
 } catch (e) {
   console.error('FATAL: Failed to import src/renderQueue.ts');
   console.error('Make sure tsx is installed: npm install --save-dev tsx');
@@ -66,69 +127,14 @@ try {
   process.exit(1);
 }
 
-const { LAYER_WALKOVER, LAYER_MID, LAYER_AGENT, LAYER_WALLS_FRONT } = renderQueue;
-
-function buildSortedRenderQueue(agents, walkoverTiles, midTiles, wallsFrontTiles) {
-  const queue = [];
-
-  for (const agent of agents) {
-    queue.push({
-      sortY: agent.feetY,
-      layer: LAYER_AGENT,
-      draw: agent.drawAgent,
-      name: agent.id,
-    });
-  }
-
-  for (const tile of walkoverTiles) {
-    queue.push({
-      sortY: tile.sortY,
-      layer: LAYER_WALKOVER,
-      draw: tile.draw,
-      name: `walkover-${tile.coord.x},${tile.coord.y}`,
-    });
-  }
-
-  for (const tile of midTiles) {
-    queue.push({
-      sortY: tile.sortY,
-      layer: LAYER_MID,
-      draw: tile.draw,
-      name: `mid-${tile.coord.x},${tile.coord.y}`,
-    });
-  }
-
-  for (const tile of wallsFrontTiles) {
-    queue.push({
-      sortY: tile.sortY,
-      layer: LAYER_WALLS_FRONT,
-      draw: tile.draw,
-      name: `walls-front-${tile.coord.x},${tile.coord.y}`,
-    });
-  }
-
-  return queue.sort((a, b) =>
-    a.sortY !== b.sortY ? a.sortY - b.sortY : a.layer - b.layer
-  );
-}
-
 // Helper to create test agents
 function mockAgent(id, feetY) {
-  return {
-    id,
-    feetY,
-    drawShadow: () => {},
-    drawAgent: () => {},
-  };
+  return { id, feetY };
 }
 
 // Helper to create test tiles
 function mockTile(x, y, sortY) {
-  return {
-    coord: { x, y },
-    sortY,
-    draw: () => {},
-  };
+  return { coord: { x, y }, sortY };
 }
 
 console.log('--- Module Import Tests ---\n');
@@ -149,7 +155,7 @@ test('LAYER_WALLS_FRONT is 30', () => {
   assert.strictEqual(LAYER_WALLS_FRONT, 30);
 });
 
-console.log('\n--- Depth-Sorted Queue Tests ---\n');
+console.log('\n--- Depth-Sorted Queue Tests (real buildSortedRenderQueue) ---\n');
 
 test('Agent draws after walkover at same Y (walkover under agent)', () => {
   const agents = [mockAgent('test', 100)];
@@ -170,15 +176,15 @@ test('Agent draws after furniture-mid at same Y (mid under agent)', () => {
 test('Items at lower Y (higher on screen) draw first', () => {
   const agents = [mockAgent('front', 100), mockAgent('back', 200)];
   const queue = buildSortedRenderQueue(agents, [], [], []);
-  assert.strictEqual(queue[0].name, 'front', 'Lower Y agent first');
-  assert.strictEqual(queue[1].name, 'back', 'Higher Y agent second');
+  assert.strictEqual(queue[0].sortY, 100, 'Lower Y first');
+  assert.strictEqual(queue[1].sortY, 200, 'Higher Y second');
 });
 
 test('Depth sorting: agent behind furniture-mid when feet above tile', () => {
   const agents = [mockAgent('test', 90)];
   const mid = [mockTile(0, 0, 100)];
   const queue = buildSortedRenderQueue(agents, [], mid, []);
-  assert.strictEqual(queue[0].name, 'test', 'Agent with lower Y first (behind)');
+  assert.strictEqual(queue[0].sortY, 90, 'Agent with lower Y first (behind)');
   assert.strictEqual(queue[1].layer, LAYER_MID, 'Mid second (in front)');
 });
 
@@ -187,7 +193,7 @@ test('Depth sorting: agent in front of furniture-mid when feet below tile', () =
   const mid = [mockTile(0, 0, 100)];
   const queue = buildSortedRenderQueue(agents, [], mid, []);
   assert.strictEqual(queue[0].layer, LAYER_MID, 'Mid with lower Y first (behind)');
-  assert.strictEqual(queue[1].name, 'test', 'Agent second (in front)');
+  assert.strictEqual(queue[1].sortY, 110, 'Agent second (in front)');
 });
 
 test('Multiple agents sort by feet Y regardless of agent ID', () => {
@@ -204,99 +210,49 @@ test('Multiple agents sort by feet Y regardless of agent ID', () => {
   assert.strictEqual(queue[3].sortY, 180);
 });
 
-console.log('\n--- Engine Render Pass Tests ---\n');
+console.log('\n--- Engine Render Pass Order Tests ---\n');
 
-test('Shadow pass: shadows drawn before depth-sorted queue', () => {
-  const drawOrder = [];
+test('Wall-front always on top: not in depth-sorted queue with avatars', () => {
+  // Per engine.ts, wall-front is drawn in PASS 4, after the depth-sorted queue
+  // The buildSortedRenderQueue CAN include wall-front tiles, but engine.ts
+  // calls it with empty wallsFrontTiles array: buildSortedRenderQueue(agents, [], midTiles, [])
   
-  // Simulate engine render passes
-  // PASS 1: walkover
-  drawOrder.push('walkover');
+  // Verify engine.ts passes empty array for wallsFrontTiles
+  const enginePath = path.resolve(__dirname, '../src/engine.ts');
+  const engine = fs.readFileSync(enginePath, 'utf-8');
   
-  // PASS 2: ALL shadows (before depth-sorted queue)
-  drawOrder.push('shadow-agent1');
-  drawOrder.push('shadow-agent2');
-  
-  // PASS 3: depth-sorted queue (mid + agents, NOT wall-front)
-  const agents = [
-    { id: 'agent1', feetY: 200, drawAgent: () => drawOrder.push('agent1') },
-    { id: 'agent2', feetY: 50, drawAgent: () => drawOrder.push('agent2') },
-  ];
-  const mid = [
-    { coord: { x: 0, y: 0 }, sortY: 100, draw: () => drawOrder.push('mid') },
-  ];
-  // Wall-front NOT in queue - drawn separately after
-  const queue = buildSortedRenderQueue(agents, [], mid, []);
-  for (const item of queue) {
-    item.draw();
-  }
-  
-  // PASS 4: wall-front (after depth-sorted queue)
-  drawOrder.push('wall-front');
-  
-  // PASS 5: overlay
-  drawOrder.push('overlay');
-  
-  // Verify order
-  assert.deepStrictEqual(drawOrder, [
-    'walkover',
-    'shadow-agent1',
-    'shadow-agent2',
-    'agent2',  // feetY=50, drawn first (behind)
-    'mid',     // sortY=100
-    'agent1',  // feetY=200, drawn last (in front of mid)
-    'wall-front',
-    'overlay',
-  ]);
-  
-  // Shadows before everything in queue
-  const shadowIdx1 = drawOrder.indexOf('shadow-agent1');
-  const shadowIdx2 = drawOrder.indexOf('shadow-agent2');
-  const midIdx = drawOrder.indexOf('mid');
-  const agent1Idx = drawOrder.indexOf('agent1');
-  assert.ok(shadowIdx1 < midIdx, 'Shadow 1 before mid');
-  assert.ok(shadowIdx2 < midIdx, 'Shadow 2 before mid');
-  assert.ok(shadowIdx1 < agent1Idx, 'Shadow 1 before agent1');
+  // Should find: buildSortedRenderQueue(agents, [], midTiles, [])
+  assert.ok(
+    engine.includes('buildSortedRenderQueue(agents, [], midTiles, [])'),
+    'Engine should call buildSortedRenderQueue with empty wallsFrontTiles array'
+  );
 });
 
-test('Wall-front pass: wall-front always on top of avatars', () => {
-  const drawOrder = [];
+test('Wall-front drawn in separate pass after depth-sorted queue', () => {
+  const enginePath = path.resolve(__dirname, '../src/engine.ts');
+  const engine = fs.readFileSync(enginePath, 'utf-8');
   
-  // Agent with very high Y (should be "in front" in depth sort)
-  const agents = [
-    { id: 'agent', feetY: 9999, drawAgent: () => drawOrder.push('agent') },
-  ];
+  // Should have PASS 4 comment for wall-front
+  assert.ok(
+    engine.includes('PASS 4: Wall-front'),
+    'Engine should have PASS 4 for wall-front'
+  );
   
-  // PASS 3: depth-sorted queue (agents only, wall-front NOT in queue)
-  const queue = buildSortedRenderQueue(agents, [], [], []);
-  for (const item of queue) {
-    item.draw();
-  }
-  
-  // PASS 4: wall-front drawn AFTER queue
-  drawOrder.push('wall-front');
-  
-  // Wall-front is after agent even though agent Y=9999
-  const agentIdx = drawOrder.indexOf('agent');
-  const wallIdx = drawOrder.indexOf('wall-front');
-  assert.ok(wallIdx > agentIdx, 'Wall-front drawn after agent regardless of Y');
+  // Should iterate wallsFrontTiles after the queue
+  assert.ok(
+    engine.includes('for (const tile of wallsFrontTiles)'),
+    'Engine should iterate wallsFrontTiles separately'
+  );
 });
 
-test('Wall-front pass: wall-front always on top of shadows', () => {
-  const drawOrder = [];
+test('Shadows drawn before depth-sorted queue (PASS 2)', () => {
+  const enginePath = path.resolve(__dirname, '../src/engine.ts');
+  const engine = fs.readFileSync(enginePath, 'utf-8');
   
-  // PASS 2: shadows
-  drawOrder.push('shadow');
-  
-  // PASS 3: depth-sorted queue
-  drawOrder.push('agent');
-  
-  // PASS 4: wall-front
-  drawOrder.push('wall-front');
-  
-  const shadowIdx = drawOrder.indexOf('shadow');
-  const wallIdx = drawOrder.indexOf('wall-front');
-  assert.ok(wallIdx > shadowIdx, 'Wall-front drawn after shadow');
+  assert.ok(
+    engine.includes('PASS 2: Draw ALL shadows'),
+    'Engine should have PASS 2 for shadows'
+  );
 });
 
 console.log(`\n=== Results: ${passed} passed, ${failed} failed ===\n`);
