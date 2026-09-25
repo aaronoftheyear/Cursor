@@ -29,6 +29,11 @@ import {
   randomNpcPauseMs,
   truncatePath,
 } from './npcMotion';
+import {
+  buildSortedRenderQueue,
+  AgentRenderInfo,
+  TileRenderInfo,
+} from './renderQueue';
 
 const MOVE_SPEED = 1.15;
 const WORK_MOVE_SPEED = 1.25;
@@ -873,42 +878,27 @@ export class GameEngine {
     
     const layout = this.renderer.getLayout();
     
-    // Depth-sorted render queue. Items are sorted by sortY (Y position of feet/bottom),
-    // then by order (layer priority). Lower sortY = higher on screen = drawn first.
-    // At same sortY, lower order = drawn first (underneath).
+    // Rendering order (see renderQueue.ts for layer constants):
+    //   1. Background (floor/grass/walls) - baked into mapBackground, drawn by clear()
+    //   2. Furniture-low (walkover) - walkable tiles drawn under avatar
+    //   3. ALL SHADOWS - separate pass, always under furniture-mid/wall-front
+    //   4. Depth-sorted queue: furniture-mid, avatars, wall-front
+    //   5. Overlay (furniture-high) - always on top of avatar
     //
-    // Layer ordering (Tiled layer → render order):
-    //   grass/floor    → background (baked into mapBackground)
-    //   furniture-low  → DRAW_WALKOVER (0)  - walkable, under avatar
-    //   walls          → collision only (baked into mapBackground)
-    //   furniture-mid  → DRAW_MID (-10)     - collision, depth sorted with avatar
-    //   furniture-high → overlay (drawn after queue, always on top of avatar)
-    //   wall-front     → DRAW_WALLS_FRONT (20) - collision, always on top of avatar+shadow
-    //
-    // Shadow rule: always drawn under furniture-mid and avatar at same Y (order -20).
-    // Depth sorting: items at lower Y (higher on screen) draw first (behind).
-    type DrawItem = { sortY: number; order: number; draw: () => void };
-    const queue: DrawItem[] = [];
-    const DRAW_SHADOW = -20;
-    const DRAW_MID = -10;
-    const DRAW_WALKOVER = 0;
-    const DRAW_AGENT = 10;
-    const DRAW_WALLS_FRONT = 20;
+    // Shadow rule: shadows are drawn in their own pass BEFORE the depth-sorted
+    // queue, so they are ALWAYS under furniture-mid and wall-front regardless
+    // of Y position. Shadows sit on top of floor/grass/furniture-low only.
 
-    // Add shadows and agents with per-agent sprite height for consistent depth sorting.
-    // The sortY must match the actual feet position used by collision detection.
+    // Build agent render info with per-agent feet positions
+    const agents: AgentRenderInfo[] = [];
     for (const agent of this.state.agents) {
       if (!this.isAgentDrawn(agent)) continue;
-      const agentFeetY = this.agentFeetY(agent);
-      queue.push({
-        sortY: agentFeetY,
-        order: DRAW_SHADOW,
-        draw: () => this.renderer.drawAgentShadow(agent),
-      });
-      queue.push({
-        sortY: agentFeetY,
-        order: DRAW_AGENT,
-        draw: () =>
+      const feetY = this.agentFeetY(agent);
+      agents.push({
+        id: agent.id,
+        feetY,
+        drawShadow: () => this.renderer.drawAgentShadow(agent),
+        drawAgent: () =>
           this.renderer.drawAgent(
             agent,
             agent.id === this.state.selectedAgent,
@@ -917,36 +907,49 @@ export class GameEngine {
       });
     }
 
-    for (const { x, y } of this.renderer.getMidTiles()) {
-      queue.push({
+    // Build tile render info
+    const walkoverTiles: TileRenderInfo[] = this.renderer
+      .getWalkoverTiles()
+      .map(({ x, y }) => ({
+        coord: { x, y },
         sortY: this.renderer.tileFootSortY(layout, y),
-        order: DRAW_MID,
-        draw: () => this.renderer.drawMidTile(layout, x, y),
-      });
-    }
-
-    for (const { x, y } of this.renderer.getWalkoverTiles()) {
-      queue.push({
-        sortY: this.renderer.tileFootSortY(layout, y),
-        order: DRAW_WALKOVER,
         draw: () => this.renderer.drawWalkoverTile(layout, x, y),
-      });
-    }
+      }));
 
-    for (const { x, y } of this.renderer.getWallsFrontTiles()) {
-      queue.push({
+    const midTiles: TileRenderInfo[] = this.renderer
+      .getMidTiles()
+      .map(({ x, y }) => ({
+        coord: { x, y },
         sortY: this.renderer.tileFootSortY(layout, y),
-        order: DRAW_WALLS_FRONT,
+        draw: () => this.renderer.drawMidTile(layout, x, y),
+      }));
+
+    const wallsFrontTiles: TileRenderInfo[] = this.renderer
+      .getWallsFrontTiles()
+      .map(({ x, y }) => ({
+        coord: { x, y },
+        sortY: this.renderer.tileFootSortY(layout, y),
         draw: () => this.renderer.drawWallsFrontTile(layout, x, y),
-      });
+      }));
+
+    // PASS 1: Draw furniture-low (walkover) tiles first - these are under shadows
+    for (const tile of walkoverTiles) {
+      tile.draw();
     }
 
-    queue.sort((a, b) => (a.sortY !== b.sortY ? a.sortY - b.sortY : a.order - b.order));
+    // PASS 2: Draw ALL shadows - always under furniture-mid and wall-front
+    for (const agent of agents) {
+      agent.drawShadow();
+    }
+
+    // PASS 3: Depth-sorted queue (furniture-mid, avatars, wall-front)
+    // Shadows are NOT in this queue, so they're always underneath
+    const queue = buildSortedRenderQueue(agents, [], midTiles, wallsFrontTiles);
     for (const item of queue) {
       item.draw();
     }
 
-    // Overlay (furniture-high) is always drawn on top of everything
+    // PASS 4: Overlay (furniture-high) is always drawn on top of everything
     this.renderer.drawMapOverlay(layout);
 
     if (this.state.selectedAgent) {
