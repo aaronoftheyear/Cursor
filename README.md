@@ -140,53 +140,82 @@ Edit `ROUTING_RULES` in `src/orchestrator.ts` to adjust keyword weights and agen
 
 ## External Agent Status
 
-The dashboard can display live status for external agents (non-Cursor bots, desktop assistants, etc.) alongside Cursor-integrated agents.
+The dashboard can display live status for external agents (non-Cursor bots, desktop assistants, etc.) alongside Cursor-integrated agents. External agents use the **same activity vocabulary** as Cursor hooks, so they walk to matching action spots in the Main Space.
 
 ### Setting External Agent Status
 
 Use the CLI script to report status from any shell command:
 
 ```bash
-# Basic usage
-./scripts/set-agent-status.sh <agent-id> <status> [detail]
-
-# Set Grok to working with a detail message
-./scripts/set-agent-status.sh grokbot working "Searching Twitter trends"
-
-# Set Grok to thinking
-./scripts/set-agent-status.sh grokbot thinking "Processing query..."
-
-# Set Grok back to idle
-./scripts/set-agent-status.sh grokbot idle
+./scripts/set-agent-status.sh <agent-id> <status> [options]
 ```
 
 **Arguments:**
-- `agent-id` - The agent identifier (e.g. `grokbot`, `gemini`, `apple-intelligence`)
-- `status` - One of: `idle`, `working`, `thinking`, `busy`
-- `detail` - Optional short description shown in the sidebar
+| Argument | Required | Description |
+|----------|----------|-------------|
+| `agent-id` | Yes | Agent identifier (e.g. `grokbot`, `gemini`, `apple-intelligence`) |
+| `status` | Yes | One of: `idle`, `working`, `busy` |
 
-**Supported agents:** Any agent defined in `src/agents.ts` can receive external status. Common ones:
-- `grokbot` - Grok / X assistant
-- `gemini` - Google Gemini
-- `apple-intelligence` - Apple Intelligence / Siri
+**Options:**
+| Option | Description |
+|--------|-------------|
+| `-a, --activity <activity>` | Activity type (required when status is working/busy) |
+| `-d, --depth <depth>` | Activity depth: `brief` (stay at desk) or `deep` (walk to spot) |
+| `-m, --message <text>` | Detail message shown in sidebar |
+| `-h, --help` | Show help with all options |
+
+### Activities (same as Cursor hooks)
+
+These map to action spots in the game world:
+
+| Activity | Description | Brief | Deep |
+|----------|-------------|-------|------|
+| `planning` | Planning, architecting, designing | Stays at computer | Walks to planning board |
+| `thinking` | Thinking, reasoning, processing | Stays at computer | Walks to thinking spot |
+| `reading` | Reading files, docs, research | Stays at computer | Walks to bookshelf |
+| `editing` | Editing files, coding | Stays at computer | Stays at computer |
+| `running` | Running shell commands | Stays at computer | Stays at computer |
+
+### Examples
+
+```bash
+# Grok is researching Twitter (stays at computer)
+./scripts/set-agent-status.sh grokbot working -a reading -m "Searching Twitter trends"
+
+# Grok is deeply thinking (walks to thinking spot)
+./scripts/set-agent-status.sh grokbot working -a thinking -d deep
+
+# Grok is running a command
+./scripts/set-agent-status.sh grokbot working -a running -m "Fetching API data"
+
+# Grok is planning something (walks to planning board)
+./scripts/set-agent-status.sh grokbot working -a planning -d deep -m "Designing workflow"
+
+# Grok is idle
+./scripts/set-agent-status.sh grokbot idle
+```
 
 ### How It Works
 
 1. The script writes to `.dashboard/external-agents.json`
 2. The Vite dev server merges this with Cursor hook status when serving `/live-status.json`
 3. External agent status takes precedence over default idle state
-4. **Staleness:** If no update is received for 2 minutes, the agent reverts to idle
+4. The engine reads `activity` and `activityDepth` to pick the correct action spot
+5. **Staleness:** If no update is received for 2 minutes, the agent reverts to idle
 
-### Example: Desktop Assistant Integration
+### Desktop Assistant Integration
 
-If you have a Grok-based desktop assistant, add these calls to your bot:
+For a Grok-based desktop assistant, add these calls:
 
 ```bash
-# When starting a task
-./scripts/set-agent-status.sh grokbot working "Researching: $QUERY"
+# When starting research
+./scripts/set-agent-status.sh grokbot working -a reading -m "Researching: $QUERY"
 
-# When thinking/processing
-./scripts/set-agent-status.sh grokbot thinking
+# When thinking deeply
+./scripts/set-agent-status.sh grokbot working -a thinking -d deep
+
+# When running a command
+./scripts/set-agent-status.sh grokbot working -a running -m "Running: $CMD"
 
 # When done
 ./scripts/set-agent-status.sh grokbot idle

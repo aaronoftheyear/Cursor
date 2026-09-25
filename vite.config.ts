@@ -11,7 +11,7 @@ interface AgentStatus {
   source?: string
   updatedAt?: string
   activity?: string
-  activityDepth?: string
+  activityDepth?: 'brief' | 'deep'
 }
 
 interface LiveStatus {
@@ -51,11 +51,14 @@ function mergeExternalAgents(live: LiveStatus, external: ExternalAgents): LiveSt
         source: 'external',
       }
     } else {
-      merged.agents[agentId] = {
+      const entry: AgentStatus = {
         status: extStatus.status,
-        detail: extStatus.detail ?? undefined,
         source: 'external',
       }
+      if (extStatus.detail) entry.detail = extStatus.detail
+      if (extStatus.activity) entry.activity = extStatus.activity
+      if (extStatus.activityDepth) entry.activityDepth = extStatus.activityDepth
+      merged.agents[agentId] = entry
     }
   }
 
