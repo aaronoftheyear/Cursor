@@ -3,8 +3,10 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import sys
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -13,8 +15,16 @@ STATUS_DIR = PROJECT_ROOT / ".dashboard"
 STATUS_FILE = STATUS_DIR / "live-status.json"
 PUBLIC_MIRROR = PROJECT_ROOT / "public" / "live-status.json"
 LINKS_FILE = PROJECT_ROOT / "public" / "assets" / "agent-links.json"
+SEEN_EVENTS_FILE = STATUS_DIR / "seen-events.json"
 
 DEFAULT_AGENTS = ("jarvis", "friday", "bumblebee")
+
+# Self-healing timeout: reset working agents to idle if no events for this long
+STALE_TIMEOUT_SECONDS = 300  # 5 minutes
+
+# Deduplication window: ignore events with same fingerprint within this window
+DEDUPE_WINDOW_SECONDS = 5
+MAX_SEEN_EVENTS = 100  # Keep at most this many recent event fingerprints
 
 ACTIVITY_LABELS = {
     "planning": "Planning",
@@ -29,6 +39,108 @@ ACTIVITY_LABELS = {
 
 def utc_now() -> str:
     return datetime.now(timezone.utc).isoformat()
+
+
+def utc_now_ts() -> float:
+    return time.time()
+
+
+def compute_event_fingerprint(event: str, hook: dict) -> str:
+    """Create a fingerprint to detect duplicate events from project + global hooks."""
+    key_fields = {
+        "event": event,
+        "generation_id": hook.get("generation_id") or hook.get("generationId"),
+        "session_id": hook.get("session_id") or hook.get("sessionId"),
+        "tool_name": hook.get("tool_name") or hook.get("toolName"),
+        "file_path": hook.get("file_path") or hook.get("filePath"),
+        "timestamp": hook.get("timestamp"),
+    }
+    blob = json.dumps(key_fields, sort_keys=True, default=str)
+    return hashlib.sha256(blob.encode()).hexdigest()[:16]
+
+
+def load_seen_events() -> dict:
+    """Load recent event fingerprints for deduplication."""
+    if SEEN_EVENTS_FILE.is_file():
+        try:
+            data = json.loads(SEEN_EVENTS_FILE.read_text(encoding="utf-8"))
+            if isinstance(data, dict) and "events" in data:
+                return data
+        except (json.JSONDecodeError, OSError):
+            pass
+    return {"events": {}}
+
+
+def save_seen_events(seen: dict) -> None:
+    """Save recent event fingerprints, pruning old ones."""
+    now = utc_now_ts()
+    events = seen.get("events", {})
+    pruned = {
+        fp: ts for fp, ts in events.items()
+        if now - ts < DEDUPE_WINDOW_SECONDS * 10
+    }
+    if len(pruned) > MAX_SEEN_EVENTS:
+        sorted_fps = sorted(pruned.items(), key=lambda x: x[1], reverse=True)
+        pruned = dict(sorted_fps[:MAX_SEEN_EVENTS])
+    seen["events"] = pruned
+    STATUS_DIR.mkdir(parents=True, exist_ok=True)
+    SEEN_EVENTS_FILE.write_text(json.dumps(seen, indent=2) + "\n", encoding="utf-8")
+
+
+def is_duplicate_event(event: str, hook: dict) -> bool:
+    """Check if this event was already processed (dedupe project + global hooks)."""
+    fp = compute_event_fingerprint(event, hook)
+    seen = load_seen_events()
+    now = utc_now_ts()
+    events = seen.get("events", {})
+    if fp in events:
+        last_seen = events[fp]
+        if now - last_seen < DEDUPE_WINDOW_SECONDS:
+            return True
+    events[fp] = now
+    seen["events"] = events
+    save_seen_events(seen)
+    return False
+
+
+def heal_stale_agents(state: dict) -> bool:
+    """Reset agents to idle if they're stuck working with no recent events."""
+    now = utc_now_ts()
+    changed = False
+    agents = state.get("agents", {})
+    sessions = state.get("agentSessions", {})
+    last_events = state.setdefault("lastEventAt", {})
+    for agent_id in DEFAULT_AGENTS:
+        agent = agents.get(agent_id)
+        if not agent:
+            continue
+        if agent.get("status") not in ("working", "busy"):
+            continue
+        if agent.get("source") == "cloud-api":
+            continue
+        session_count = int(sessions.get(agent_id, 0))
+        last_event_ts = last_events.get(agent_id)
+        is_stale = False
+        if session_count <= 0:
+            is_stale = True
+        elif last_event_ts:
+            try:
+                if now - float(last_event_ts) > STALE_TIMEOUT_SECONDS:
+                    is_stale = True
+            except (ValueError, TypeError):
+                pass
+        if is_stale:
+            agents[agent_id] = default_agent_status(agent_id)
+            if agent_id in sessions:
+                sessions[agent_id] = 0
+            changed = True
+    return changed
+
+
+def touch_agent_event(state: dict, agent_id: str) -> None:
+    """Record that we received an event for this agent."""
+    last_events = state.setdefault("lastEventAt", {})
+    last_events[agent_id] = utc_now_ts()
 
 
 def load_agent_link_specs() -> dict[str, dict[str, list[str]]]:
@@ -477,7 +589,16 @@ def main() -> int:
     if not isinstance(hook, dict):
         hook = {"payload": hook}
 
+    # Dedupe: inside Dashboard workspace, both project hook and global forwarder
+    # run this script. Skip if we already processed this exact event.
+    if is_duplicate_event(event, hook):
+        return 0
+
     state = load_state()
+
+    # Self-healing: reset agents stuck in working state with no recent events
+    if heal_stale_agents(state):
+        save_state(state)
 
     # Integrated terminal — count from every workspace (not only Dashboard / cloud matchers).
     if event == "beforeShellExecution":
@@ -536,6 +657,7 @@ def main() -> int:
         bump_agent_sessions(state, agents, 1)
         activity, detail = activity_from_hook(event, hook)
         for agent_id in agents:
+            touch_agent_event(state, agent_id)
             depth = resolve_activity_depth(event, hook, activity, state, agent_id)
             set_agent(
                 state,
@@ -571,6 +693,7 @@ def main() -> int:
                 save_state(state)
             return 0
         for agent_id in agents:
+            touch_agent_event(state, agent_id)
             depth = resolve_activity_depth(event, hook, activity, state, agent_id)
             set_agent(
                 state,
