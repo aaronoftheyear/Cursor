@@ -253,6 +253,7 @@ function runRealHook(claudeEvent, payload = {}) {
     env: {
       ...process.env,
       DASHBOARD_PROJECT_ROOT: realHookTempDir,
+      DASHBOARD_HOOK_SYNC: '1',
     },
   });
   

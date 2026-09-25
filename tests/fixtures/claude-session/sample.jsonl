@@ -1,0 +1,7 @@
+{"type":"system","subtype":"init","session_id":"fixture-session-001"}
+{"type":"assistant","message":{"content":[{"type":"tool_use","id":"tu-read-1","name":"Read","input":{"file_path":"/demo/project/src/app.ts"}}]}}
+{"type":"assistant","message":{"content":[{"type":"tool_use","id":"tu-edit-1","name":"Edit","input":{"file_path":"/demo/project/src/app.ts"}}]}}
+{"type":"assistant","message":{"content":[{"type":"tool_use","id":"tu-bash-1","name":"Bash","input":{"command":"npm test"}}]}}
+{"type":"assistant","message":{"content":[{"type":"tool_use","id":"tu-gh-1","name":"Bash","input":{"command":"git status"}}]}}
+{"type":"assistant","message":{"content":[{"type":"tool_use","id":"tu-web-1","name":"WebSearch","input":{"query":"vite middleware"}}]}}
+{"type":"permission_request","subtype":"permission_prompt","session_id":"fixture-session-001"}

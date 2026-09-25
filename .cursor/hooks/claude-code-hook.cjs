@@ -5,9 +5,12 @@
  * Receives Claude Code hook events and forwards them to the Dashboard's
  * existing status pipeline via update-dashboard-status.py.
  *
+ * Non-blocking (pixtuoid-style): spawns the status updater detached and exits
+ * immediately so Claude Code is never delayed when the dashboard is down.
+ *
  * Claude Code events are translated to the Cursor event format:
  *   SessionStart → sessionStart
- *   UserPromptSubmit → beforeSubmitPrompt  
+ *   UserPromptSubmit → beforeSubmitPrompt
  *   PreToolUse → preToolUse
  *   PostToolUse → postToolUse
  *   Stop → stop
@@ -19,10 +22,17 @@
  *   PreCompact - Internal event
  *
  * Tool names are mapped to activities by update-dashboard-status.py.
+ *
+ * @dashboard_hook_version 2
  */
 
-const { spawnSync } = require('child_process');
+const { spawn, spawnSync } = require('child_process');
+const fs = require('fs');
 const path = require('path');
+const http = require('http');
+
+const HOOK_VERSION = 2;
+const FORWARD_TIMEOUT_MS = 250;
 
 const STATUS_SCRIPT = path.join(__dirname, 'update-dashboard-status.py');
 
@@ -40,6 +50,13 @@ const IGNORED_EVENTS = new Set([
   'Notification',
   'PreCompact',
 ]);
+
+function resolveProjectRoot() {
+  if (process.env.DASHBOARD_PROJECT_ROOT) {
+    return process.env.DASHBOARD_PROJECT_ROOT;
+  }
+  return path.resolve(__dirname, '..', '..');
+}
 
 function translateClaudePayload(claudePayload) {
   const cursorPayload = {
@@ -70,6 +87,67 @@ function translateClaudePayload(claudePayload) {
   cursorPayload.claude_code = true;
 
   return cursorPayload;
+}
+
+function registerHookSession(projectRoot, sessionId) {
+  if (!sessionId) return;
+  try {
+    const file = path.join(projectRoot, '.dashboard', 'hook-sessions.json');
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    let reg = { sessions: {} };
+    try {
+      reg = JSON.parse(fs.readFileSync(file, 'utf-8'));
+      if (!reg.sessions) reg.sessions = {};
+    } catch {
+      reg = { sessions: {} };
+    }
+    reg.sessions[sessionId] = { lastHookAt: Date.now() };
+    fs.writeFileSync(file, JSON.stringify(reg, null, 2) + '\n');
+  } catch {
+    /* never block hook */
+  }
+}
+
+function forwardDetached(cursorEvent, cursorPayload, projectRoot, claudePayload) {
+  const payloadJson = JSON.stringify(cursorPayload);
+  try {
+    const child = spawn('python3', [STATUS_SCRIPT, cursorEvent], {
+      cwd: projectRoot,
+      env: { ...process.env, DASHBOARD_PROJECT_ROOT: projectRoot },
+      detached: true,
+      stdio: ['pipe', 'ignore', 'ignore'],
+    });
+    child.stdin.write(payloadJson);
+    child.stdin.end();
+    child.unref();
+  } catch {
+    /* ignore */
+  }
+
+  try {
+    const req = http.request(
+      {
+        hostname: '127.0.0.1',
+        port: 5173,
+        path: '/__agent_activity/claude-hook',
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Content-Length': Buffer.byteLength(payloadJson),
+        },
+        timeout: FORWARD_TIMEOUT_MS,
+      },
+      (res) => {
+        res.resume();
+      }
+    );
+    req.on('error', () => {});
+    req.on('timeout', () => req.destroy());
+    req.write(JSON.stringify(claudePayload));
+    req.end();
+  } catch {
+    /* ignore */
+  }
 }
 
 async function readStdin() {
@@ -108,13 +186,21 @@ async function main() {
       process.exit(0);
     }
 
+    const projectRoot = resolveProjectRoot();
     const cursorPayload = translateClaudePayload(claudePayload);
+    registerHookSession(projectRoot, cursorPayload.session_id);
 
-    spawnSync('python3', [STATUS_SCRIPT, cursorEvent], {
-      input: JSON.stringify(cursorPayload),
-      encoding: 'utf-8',
-      stdio: ['pipe', 'ignore', 'ignore'],
-    });
+    if (process.env.DASHBOARD_HOOK_SYNC === '1') {
+      spawnSync('python3', [STATUS_SCRIPT, cursorEvent], {
+        cwd: projectRoot,
+        env: { ...process.env, DASHBOARD_PROJECT_ROOT: projectRoot },
+        input: JSON.stringify(cursorPayload),
+        encoding: 'utf-8',
+        stdio: ['pipe', 'ignore', 'ignore'],
+      });
+    } else {
+      forwardDetached(cursorEvent, cursorPayload, projectRoot, claudePayload);
+    }
 
     process.exit(0);
   } catch {
@@ -123,3 +209,5 @@ async function main() {
 }
 
 main();
+
+module.exports = { HOOK_VERSION, translateClaudePayload, forwardDetached };
