@@ -1,7 +1,7 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import type { Connect } from 'vite'
-import { defineConfig } from 'vite'
+import { defineConfig, loadEnv } from 'vite'
 
 const EXTERNAL_STALE_MS = 120_000 // 2 minutes
 const CURSOR_STALE_MS = 300_000 // 5 minutes - self-healing for stuck agents
@@ -145,8 +145,7 @@ function mergeExternalAgents(live: LiveStatus, external: ExternalAgents): LiveSt
   return merged
 }
 
-async function pollCloudAgentsApi(config: AgentLinksConfig): Promise<Map<string, CloudAgentStatus>> {
-  const apiKey = process.env.CURSOR_API_KEY
+async function pollCloudAgentsApi(config: AgentLinksConfig, apiKey: string | undefined): Promise<Map<string, CloudAgentStatus>> {
   if (!apiKey) {
     return new Map()
   }
@@ -270,52 +269,65 @@ function mergeCloudAgents(live: LiveStatus, cloudStatus: Map<string, CloudAgentS
   return merged
 }
 
-async function liveStatusMiddleware(
-  _req: Connect.IncomingMessage,
-  res: Connect.ServerResponse,
-  _next: Connect.NextFunction
-): Promise<void> {
-  const livePath = path.join(process.cwd(), '.dashboard', 'live-status.json')
-  const publicPath = path.join(process.cwd(), 'public', 'live-status.json')
-  const externalPath = path.join(process.cwd(), '.dashboard', 'external-agents.json')
-  const linksPath = path.join(process.cwd(), 'public', 'assets', 'agent-links.json')
+function createLiveStatusMiddleware(cursorApiKey: string | undefined) {
+  return async function liveStatusMiddleware(
+    _req: Connect.IncomingMessage,
+    res: Connect.ServerResponse,
+    _next: Connect.NextFunction
+  ): Promise<void> {
+    const livePath = path.join(process.cwd(), '.dashboard', 'live-status.json')
+    const publicPath = path.join(process.cwd(), 'public', 'live-status.json')
+    const externalPath = path.join(process.cwd(), '.dashboard', 'external-agents.json')
+    const linksPath = path.join(process.cwd(), 'public', 'assets', 'agent-links.json')
 
-  const liveFile = fs.existsSync(livePath) ? livePath : publicPath
-  let live = readJsonSafe<LiveStatus>(liveFile, { agents: {}, activeSessions: 0 })
-  const external = readJsonSafe<ExternalAgents>(externalPath, { agents: {} })
-  const linksConfig = readJsonSafe<AgentLinksConfig>(linksPath, { version: 1, agents: {} })
+    const liveFile = fs.existsSync(livePath) ? livePath : publicPath
+    let live = readJsonSafe<LiveStatus>(liveFile, { agents: {}, activeSessions: 0 })
+    const external = readJsonSafe<ExternalAgents>(externalPath, { agents: {} })
+    const linksConfig = readJsonSafe<AgentLinksConfig>(linksPath, { version: 1, agents: {} })
 
-  live = healStaleAgents(live)
+    live = healStaleAgents(live)
 
-  let merged = mergeExternalAgents(live, external)
+    let merged = mergeExternalAgents(live, external)
 
-  const cloudStatus = await pollCloudAgentsApi(linksConfig)
-  merged = mergeCloudAgents(merged, cloudStatus)
+    const cloudStatus = await pollCloudAgentsApi(linksConfig, cursorApiKey)
+    merged = mergeCloudAgents(merged, cloudStatus)
 
-  res.statusCode = 200
-  res.setHeader('Content-Type', 'application/json')
-  res.setHeader('Cache-Control', 'no-store')
-  res.end(JSON.stringify(merged))
+    res.statusCode = 200
+    res.setHeader('Content-Type', 'application/json')
+    res.setHeader('Cache-Control', 'no-store')
+    res.end(JSON.stringify(merged))
+  }
 }
 
-export default defineConfig({
-  base: './',
-  build: {
-    outDir: 'dist',
-    assetsDir: 'assets',
-  },
-  server: {
-    port: 5173,
-  },
-  plugins: [
-    {
-      name: 'dashboard-live-status',
-      configureServer(server) {
-        server.middlewares.use('/live-status.json', liveStatusMiddleware)
-      },
-      configurePreviewServer(server) {
-        server.middlewares.use('/live-status.json', liveStatusMiddleware)
-      },
+export default defineConfig(({ mode }) => {
+  // Load .env.local without VITE_ prefix requirement (empty prefix = all vars)
+  const env = loadEnv(mode, process.cwd(), '')
+  const cursorApiKey = env.CURSOR_API_KEY || undefined
+
+  // Log cloud polling status at startup (never log the key itself)
+  console.log(`[Dashboard] Cloud agent polling: ${cursorApiKey ? 'enabled' : 'disabled (no CURSOR_API_KEY)'}`)
+
+  const liveStatusMiddleware = createLiveStatusMiddleware(cursorApiKey)
+
+  return {
+    base: './',
+    build: {
+      outDir: 'dist',
+      assetsDir: 'assets',
     },
-  ],
+    server: {
+      port: 5173,
+    },
+    plugins: [
+      {
+        name: 'dashboard-live-status',
+        configureServer(server) {
+          server.middlewares.use('/live-status.json', liveStatusMiddleware)
+        },
+        configurePreviewServer(server) {
+          server.middlewares.use('/live-status.json', liveStatusMiddleware)
+        },
+      },
+    ],
+  }
 })
