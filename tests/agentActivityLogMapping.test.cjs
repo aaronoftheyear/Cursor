@@ -56,13 +56,22 @@ test('turnEnd maps to stop', () => {
 test('ActivityFeed stop() is a no-op when already stopped', () => {
   const out = runEval(`
     import { ActivityFeed } from '${PROJECT_ROOT}/server/agentActivity/activityFeed.ts';
-    const feed = new ActivityFeed({ projectRoot: '${PROJECT_ROOT.replace(/'/g, "\\'")}' });
+    let providerStops = 0;
+    const feed = new ActivityFeed({
+      projectRoot: '${PROJECT_ROOT.replace(/'/g, "\\'")}',
+      extraProviders: [{
+        id: 'probe',
+        start() {},
+        stop() { providerStops++; },
+      }],
+    });
     feed.start();
     feed.stop();
     feed.stop();
-    console.log(JSON.stringify({ running: feed.isRunning() }));
+    console.log(JSON.stringify({ running: feed.isRunning(), providerStops }));
   `);
   if (out.running !== false) throw new Error('feed should not be running');
+  if (out.providerStops !== 1) throw new Error(`provider stop must run once, got ${out.providerStops}`);
 });
 
 console.log(`\n=== Log mapping: ${passed} passed, ${failed} failed ===\n`);

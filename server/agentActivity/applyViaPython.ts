@@ -17,9 +17,15 @@ export function statusPythonPath(projectRoot: string): string {
 type Job = { projectRoot: string; event: AgentEvent; key: string }
 
 let globalRunning = 0
+let peakGlobalRunning = 0
 const perAgentQueue = new Map<string, Job[]>()
 const perAgentRunning = new Set<string>()
 let loggedSpawnError = false
+
+function markGlobalRunning(delta: number): void {
+  globalRunning += delta
+  if (globalRunning > peakGlobalRunning) peakGlobalRunning = globalRunning
+}
 
 function coalesceKey(event: AgentEvent): string {
   return `${event.kind}:${event.activity || ''}:${event.cursorEvent || ''}`
@@ -33,10 +39,10 @@ function drainQueue(): void {
       const job = queue.shift()!
       if (!queue.length) perAgentQueue.delete(agentId)
       perAgentRunning.add(agentId)
-      globalRunning++
+      markGlobalRunning(1)
       runOne(job.projectRoot, job.event, () => {
         perAgentRunning.delete(agentId)
-        globalRunning--
+        markGlobalRunning(-1)
         drainQueue()
       })
       started = true
@@ -102,10 +108,9 @@ export function applyEventViaPython(projectRoot: string, event: AgentEvent): voi
   const queue = perAgentQueue.get(agentId) || []
   const existingIdx = queue.findIndex((j) => j.key === key)
   if (existingIdx >= 0) {
-    queue[existingIdx] = { projectRoot, event, key }
-  } else {
-    queue.push({ projectRoot, event, key })
+    queue.splice(existingIdx, 1)
   }
+  queue.push({ projectRoot, event, key })
   perAgentQueue.set(agentId, queue)
   drainQueue()
 }
@@ -115,6 +120,7 @@ export function resetPythonApplyQueue(): void {
   perAgentQueue.clear()
   perAgentRunning.clear()
   globalRunning = 0
+  peakGlobalRunning = 0
   loggedSpawnError = false
 }
 
@@ -127,4 +133,13 @@ export function waitForPythonApplyIdle(): Promise<void> {
     }
     tick()
   })
+}
+
+/** @internal Test helper: peak concurrent Python spawns observed. */
+export function getPythonApplyConcurrencyForTests(): {
+  globalRunning: number
+  peakGlobalRunning: number
+  maxConcurrent: number
+} {
+  return { globalRunning, peakGlobalRunning, maxConcurrent: MAX_CONCURRENT }
 }

@@ -65,9 +65,13 @@ test('user prompt with text array blocks is recognized', () => {
     });
     const state = { sessionStarted: false, hadToolsInTurn: false };
     const { events } = parseClaudeJsonlLine(line, { sessionId: 'sess', filePath: '/f.jsonl', byteOffset: 20 }, state);
-    console.log(JSON.stringify({ sessionStart: events.some((e) => e.kind === 'sessionStart') }));
+    console.log(JSON.stringify({
+      sessionStart: events.some((e) => e.kind === 'sessionStart'),
+      userPrompt: events.some((e) => e.kind === 'userPrompt'),
+    }));
   `);
   if (!out.sessionStart) throw new Error('expected sessionStart from text array user prompt');
+  if (!out.userPrompt) throw new Error('expected userPrompt from text array user prompt');
 });
 
 test('idle double poll on seeded file emits zero events', () => {

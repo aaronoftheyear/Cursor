@@ -27,9 +27,9 @@ const DASHBOARD_URLS = [
   'http://[::1]:5173',
 ]
 
-export function runDoctor(projectRoot: string, _dashboardUrl?: string): DoctorReport {
+export function runDoctor(projectRoot: string, dashboardUrl?: string): DoctorReport {
   const lines: DoctorLine[] = [
-    checkDashboardReachable(),
+    checkDashboardReachable(dashboardUrl),
     checkClaudeHooks(projectRoot),
     checkClaudeSettingsJson(),
     checkSessionLogDirReadable(),
@@ -40,8 +40,11 @@ export function runDoctor(projectRoot: string, _dashboardUrl?: string): DoctorRe
   return { lines }
 }
 
-function checkDashboardReachable(): DoctorLine {
-  for (const base of DASHBOARD_URLS) {
+function checkDashboardReachable(preferred?: string): DoctorLine {
+  const bases = preferred
+    ? [preferred, ...DASHBOARD_URLS.filter((u) => u !== preferred)]
+    : DASHBOARD_URLS
+  for (const base of bases) {
     try {
       const res = spawnSync(
         'curl',

@@ -75,12 +75,23 @@ function acquireLock(projectRoot) {
   return null;
 }
 
+function lockBackoffMs(attempt) {
+  const base = 20 + Math.floor(Math.random() * 31);
+  return base + attempt * 10;
+}
+
 function registerHookSession(projectRoot, sessionId) {
   if (!sessionId) return;
   const file = hookSessionsPath(projectRoot);
   for (let attempt = 0; attempt < LOCK_MAX_ATTEMPTS; attempt++) {
     const release = acquireLock(projectRoot);
-    if (!release) continue;
+    if (!release) {
+      const end = Date.now() + lockBackoffMs(attempt);
+      while (Date.now() < end) {
+        /* brief spin wait with jitter between lock attempts */
+      }
+      continue;
+    }
     try {
       const reg = loadRegistry(projectRoot);
       reg.sessions[sessionId] = { lastHookAt: Date.now() };
