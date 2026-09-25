@@ -16,25 +16,27 @@
 #   -h, --help                  Show this help message
 #
 # Activities (same as Cursor hooks):
-#   planning    Planning, architecting, designing (walks to planning board when deep)
-#   thinking    Thinking, reasoning, processing
-#   reading     Reading files, documentation, research (walks to bookshelf when deep)
-#   editing     Editing files, coding
-#   running     Running shell commands, executing tasks
+#   planning      Planning, architecting, designing (walks to planning board when deep)
+#   thinking      Thinking, reasoning, processing
+#   reading       Reading files, documentation
+#   editing       Editing files, coding
+#   running       Running shell commands, executing tasks
+#   researching   Web research, searching online (walks to research spot when deep)
+#   github        GitHub operations, git push/pull/fetch/clone, gh CLI
 #
 # Depth:
 #   brief       Stay at computer/desk (default)
 #   deep        Walk to activity-specific spot (planning board, bookshelf, etc.)
 #
 # Examples:
-#   # Grok is researching Twitter (stays at computer)
-#   ./scripts/set-agent-status.sh grokbot working -a reading -m "Searching Twitter trends"
+#   # Grok is reading documentation (stays at computer)
+#   ./scripts/set-agent-status.sh grokbot working -a reading -m "Reading docs"
 #
-#   # Grok is deeply thinking (walks to thinking spot)
-#   ./scripts/set-agent-status.sh grokbot working -a thinking -d deep
+#   # Grok is researching online (walks to research spot)
+#   ./scripts/set-agent-status.sh grokbot working -a researching -d deep -m "Searching Twitter"
 #
-#   # Grok is running a command
-#   ./scripts/set-agent-status.sh grokbot working -a running -m "Fetching API data"
+#   # Grok is using GitHub (walks to GitHub spot)
+#   ./scripts/set-agent-status.sh grokbot working -a github -d deep -m "Pushing changes"
 #
 #   # Grok is idle
 #   ./scripts/set-agent-status.sh grokbot idle
@@ -50,7 +52,7 @@ STATUS_FILE="$PROJECT_ROOT/.dashboard/external-agents.json"
 
 # Valid values (must match src/liveStatus.ts)
 VALID_STATUSES="idle working busy"
-VALID_ACTIVITIES="planning thinking reading editing running"
+VALID_ACTIVITIES="planning thinking reading editing running researching github"
 VALID_DEPTHS="brief deep"
 
 show_help() {
@@ -71,37 +73,51 @@ Options:
   -h, --help                  Show this help message
 
 Activities (same as Cursor hooks, mapped to action spots):
-  planning    Planning, architecting, designing
-              → brief: stays at computer
-              → deep: walks to planning board / whiteboard
+  planning      Planning, architecting, designing
+                → brief: stays at computer
+                → deep: walks to planning board / whiteboard
 
-  thinking    Thinking, reasoning, processing
-              → brief: stays at computer
-              → deep: walks to thinking spot
+  thinking      Thinking, reasoning, processing
+                → brief: stays at computer
+                → deep: walks to thinking spot
 
-  reading     Reading files, documentation, research
-              → brief: stays at computer
-              → deep: walks to bookshelf / research area
+  reading       Reading files, documentation
+                → brief: stays at computer
+                → deep: walks to bookshelf / research area
 
-  editing     Editing files, coding
-              → always stays at computer
+  editing       Editing files, coding
+                → always stays at computer
 
-  running     Running shell commands, executing tasks
-              → always stays at computer
+  running       Running shell commands, executing tasks
+                → always stays at computer
+
+  researching   Web research, searching online (web fetch/search)
+                → brief: stays at computer
+                → deep: walks to research TV / research spot
+
+  github        GitHub operations (gh CLI, git push/pull/fetch/clone)
+                → brief: stays at computer
+                → deep: walks to GitHub spot
 
 Depth:
   brief       Stay at computer/desk (default)
   deep        Walk to activity-specific spot (planning board, bookshelf, etc.)
 
 Examples:
-  # Grok is researching Twitter (stays at computer)
-  ./scripts/set-agent-status.sh grokbot working -a reading -m "Searching Twitter trends"
+  # Grok is reading files (stays at computer)
+  ./scripts/set-agent-status.sh grokbot working -a reading -m "Reading documentation"
+
+  # Grok is researching online (walks to research spot)
+  ./scripts/set-agent-status.sh grokbot working -a researching -d deep -m "Searching Twitter trends"
 
   # Grok is deeply thinking (walks to thinking spot)
   ./scripts/set-agent-status.sh grokbot working -a thinking -d deep
 
   # Grok is running a command
   ./scripts/set-agent-status.sh grokbot working -a running -m "Fetching API data"
+
+  # Grok is using GitHub (walks to GitHub spot)
+  ./scripts/set-agent-status.sh grokbot working -a github -d deep -m "Pushing to repo"
 
   # Grok is planning something
   ./scripts/set-agent-status.sh grokbot working -a planning -d deep -m "Designing workflow"

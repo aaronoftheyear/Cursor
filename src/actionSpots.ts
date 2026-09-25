@@ -268,6 +268,8 @@ export function actionKindFromLiveActivity(
       editing: 'computer',
       running: 'computer',
       thinking: 'planning',
+      researching: 'research',
+      github: 'computer',
     };
     return deepMap[activity];
   }
@@ -282,6 +284,24 @@ export function actionKindFromLiveActivity(
       editing: 'computer',
       running: 'programming',
       thinking: 'research',
+      researching: 'research_tv',
+      github: 'github',
+    };
+    return deepMap[activity];
+  }
+
+  if (agentGroup(agent.id) === 'main') {
+    if (depth === 'brief') {
+      return 'main_workstation';
+    }
+    const deepMap: Record<LiveCursorActivity, ActionKind> = {
+      planning: 'main_workstation',
+      reading: 'research',
+      editing: 'main_workstation',
+      running: 'main_workstation',
+      thinking: 'main_workstation',
+      researching: 'research',
+      github: 'lookup_cursor',
     };
     return deepMap[activity];
   }

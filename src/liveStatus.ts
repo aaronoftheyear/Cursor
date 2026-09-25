@@ -6,7 +6,9 @@ export type LiveCursorActivity =
   | 'editing'
   | 'running'
   | 'thinking'
-  | 'reading';
+  | 'reading'
+  | 'researching'
+  | 'github';
 
 export const LIVE_ACTIVITY_LABELS: Record<LiveCursorActivity, string> = {
   planning: 'Planning',
@@ -14,6 +16,8 @@ export const LIVE_ACTIVITY_LABELS: Record<LiveCursorActivity, string> = {
   running: 'Running',
   thinking: 'Thinking',
   reading: 'Reading',
+  researching: 'Researching',
+  github: 'GitHub',
 };
 
 /** Brief = stay at computer; deep = walk to planning / research spots. */

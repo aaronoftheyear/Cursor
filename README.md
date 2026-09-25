@@ -172,21 +172,29 @@ These map to action spots in the game world:
 |----------|-------------|-------|------|
 | `planning` | Planning, architecting, designing | Stays at computer | Walks to planning board |
 | `thinking` | Thinking, reasoning, processing | Stays at computer | Walks to thinking spot |
-| `reading` | Reading files, docs, research | Stays at computer | Walks to bookshelf |
+| `reading` | Reading files, documentation | Stays at computer | Walks to bookshelf |
 | `editing` | Editing files, coding | Stays at computer | Stays at computer |
 | `running` | Running shell commands | Stays at computer | Stays at computer |
+| `researching` | Web research, online search | Stays at computer | Walks to research TV/spot |
+| `github` | GitHub ops, git push/pull/clone, gh CLI | Stays at computer | Walks to GitHub spot |
 
 ### Examples
 
 ```bash
-# Grok is researching Twitter (stays at computer)
-./scripts/set-agent-status.sh grokbot working -a reading -m "Searching Twitter trends"
+# Grok is reading files (stays at computer)
+./scripts/set-agent-status.sh grokbot working -a reading -m "Reading documentation"
+
+# Grok is researching online (walks to research spot)
+./scripts/set-agent-status.sh grokbot working -a researching -d deep -m "Searching Twitter trends"
 
 # Grok is deeply thinking (walks to thinking spot)
 ./scripts/set-agent-status.sh grokbot working -a thinking -d deep
 
 # Grok is running a command
 ./scripts/set-agent-status.sh grokbot working -a running -m "Fetching API data"
+
+# Grok is using GitHub (walks to GitHub spot)
+./scripts/set-agent-status.sh grokbot working -a github -d deep -m "Pushing to repo"
 
 # Grok is planning something (walks to planning board)
 ./scripts/set-agent-status.sh grokbot working -a planning -d deep -m "Designing workflow"
@@ -208,14 +216,20 @@ These map to action spots in the game world:
 For a Grok-based desktop assistant, add these calls:
 
 ```bash
-# When starting research
-./scripts/set-agent-status.sh grokbot working -a reading -m "Researching: $QUERY"
+# When starting web research
+./scripts/set-agent-status.sh grokbot working -a researching -d deep -m "Researching: $QUERY"
+
+# When reading files/docs
+./scripts/set-agent-status.sh grokbot working -a reading -m "Reading: $FILE"
 
 # When thinking deeply
 ./scripts/set-agent-status.sh grokbot working -a thinking -d deep
 
 # When running a command
 ./scripts/set-agent-status.sh grokbot working -a running -m "Running: $CMD"
+
+# When using GitHub
+./scripts/set-agent-status.sh grokbot working -a github -d deep -m "Pushing: $BRANCH"
 
 # When done
 ./scripts/set-agent-status.sh grokbot idle

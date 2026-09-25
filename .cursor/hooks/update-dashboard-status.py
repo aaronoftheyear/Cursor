@@ -22,6 +22,8 @@ ACTIVITY_LABELS = {
     "running": "Running",
     "thinking": "Thinking",
     "reading": "Reading",
+    "researching": "Researching",
+    "github": "GitHub",
 }
 
 
@@ -313,11 +315,17 @@ def resolve_activity_depth(
             streaks[agent_id] = int(streaks.get(agent_id, 0)) + 1
         else:
             streaks[agent_id] = 0
-        if tool in ("webfetch", "websearch", "semanticsearch", "task"):
+        if tool in ("semanticsearch", "task"):
             return "deep"
         if int(streaks.get(agent_id, 0)) >= 4:
             return "deep"
         return "brief"
+
+    if activity == "researching":
+        return "deep"
+
+    if activity == "github":
+        return "deep"
 
     return "brief"
 
@@ -330,6 +338,17 @@ def set_idle_agents(state: dict, agent_ids: tuple[str, ...]) -> None:
 def tool_name(hook: dict) -> str:
     raw = hook.get("tool_name") or hook.get("toolName") or ""
     return str(raw).lower()
+
+
+def is_github_shell_command(cmd: str) -> bool:
+    """Check if shell command is a GitHub/git operation."""
+    if not cmd or not isinstance(cmd, str):
+        return False
+    cmd = cmd.strip().lower()
+    if cmd.startswith("gh "):
+        return True
+    git_remote_ops = ("git push", "git pull", "git fetch", "git clone")
+    return any(cmd.startswith(op) for op in git_remote_ops)
 
 
 def activity_from_hook(event: str, hook: dict) -> tuple[str, str]:
@@ -350,20 +369,25 @@ def activity_from_hook(event: str, hook: dict) -> tuple[str, str]:
         cmd = hook.get("command") or ""
         if isinstance(cmd, str) and cmd.strip():
             short = cmd.strip().replace("\n", " ")[:48]
+            if is_github_shell_command(cmd):
+                return "github", f"{ACTIVITY_LABELS['github']}: {short}"
             return "running", f"{ACTIVITY_LABELS['running']}: {short}"
         return "running", ACTIVITY_LABELS["running"]
 
     if event in ("preToolUse", "postToolUse"):
         if tool in ("shell",) or tool.endswith("shell"):
+            cmd = hook.get("command") or hook.get("input", {}).get("command") or ""
+            if is_github_shell_command(cmd):
+                return "github", ACTIVITY_LABELS["github"]
             return "running", ACTIVITY_LABELS["running"]
+        if tool in ("webfetch", "websearch"):
+            return "researching", ACTIVITY_LABELS["researching"]
         if tool in (
             "read",
             "grep",
             "glob",
             "list_dir",
             "semanticsearch",
-            "webfetch",
-            "websearch",
         ):
             return "reading", ACTIVITY_LABELS["reading"]
         if tool in (
@@ -378,7 +402,13 @@ def activity_from_hook(event: str, hook: dict) -> tuple[str, str]:
             return "editing", ACTIVITY_LABELS["editing"]
         if tool in ("task", "switchmode", "todo_write", "creategoal", "updategoal"):
             return "planning", ACTIVITY_LABELS["planning"]
+        if "github" in tool or tool.startswith("github_"):
+            return "github", ACTIVITY_LABELS["github"]
         if "mcp" in tool or tool.startswith("call"):
+            tool_args = hook.get("input") or hook.get("args") or {}
+            tool_str = str(tool_args).lower()
+            if "github" in tool_str or "gh " in tool_str:
+                return "github", ACTIVITY_LABELS["github"]
             return "running", ACTIVITY_LABELS["running"]
         return "editing", ACTIVITY_LABELS["editing"]
 
