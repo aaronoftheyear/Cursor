@@ -1,0 +1,70 @@
+{
+  "version": 1,
+  "hooks": {
+    "sessionStart": [
+      {
+        "command": ".cursor/hooks/update-dashboard-status.py sessionStart"
+      }
+    ],
+    "sessionEnd": [
+      {
+        "command": ".cursor/hooks/update-dashboard-status.py sessionEnd"
+      }
+    ],
+    "beforeSubmitPrompt": [
+      {
+        "command": ".cursor/hooks/update-dashboard-status.py beforeSubmitPrompt"
+      }
+    ],
+    "afterAgentThought": [
+      {
+        "command": ".cursor/hooks/update-dashboard-status.py afterAgentThought"
+      }
+    ],
+    "beforeReadFile": [
+      {
+        "command": ".cursor/hooks/update-dashboard-status.py beforeReadFile"
+      }
+    ],
+    "afterFileEdit": [
+      {
+        "command": ".cursor/hooks/update-dashboard-status.py afterFileEdit"
+      }
+    ],
+    "beforeShellExecution": [
+      {
+        "command": ".cursor/hooks/update-dashboard-status.py beforeShellExecution"
+      }
+    ],
+    "afterShellExecution": [
+      {
+        "command": ".cursor/hooks/update-dashboard-status.py afterShellExecution"
+      }
+    ],
+    "preToolUse": [
+      {
+        "command": ".cursor/hooks/update-dashboard-status.py preToolUse"
+      }
+    ],
+    "postToolUse": [
+      {
+        "command": ".cursor/hooks/update-dashboard-status.py postToolUse"
+      }
+    ],
+    "stop": [
+      {
+        "command": ".cursor/hooks/update-dashboard-status.py stop"
+      }
+    ],
+    "subagentStart": [
+      {
+        "command": ".cursor/hooks/update-dashboard-status.py subagentStart"
+      }
+    ],
+    "subagentStop": [
+      {
+        "command": ".cursor/hooks/update-dashboard-status.py subagentStop"
+      }
+    ]
+  }
+}

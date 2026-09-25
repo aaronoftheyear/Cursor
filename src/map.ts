@@ -47,14 +47,18 @@ export class GameMap {
     return this.data.rooms.find(r => r.agents.includes(agentId));
   }
   
-  getAgentSpawnPoint(agentId: string): { x: number; y: number } | undefined {
+  /** Foot-tile spawn coordinates (same units as Tiled / hq.json spawnPoints). */
+  getAgentSpawnTile(agentId: string): { x: number; y: number } | undefined {
     const spawn = this.data.spawnPoints[agentId];
     if (!spawn) return undefined;
-    
-    return {
-      x: spawn.x * this.scale,
-      y: spawn.y * this.scale,
-    };
+    return { x: spawn.x, y: spawn.y };
+  }
+
+  /** @deprecated Use getAgentSpawnTile — kept for callers expecting pixel coords. */
+  getAgentSpawnPoint(agentId: string): { x: number; y: number } | undefined {
+    const tile = this.getAgentSpawnTile(agentId);
+    if (!tile) return undefined;
+    return { x: tile.x * this.scale, y: tile.y * this.scale };
   }
   
   getRoomBounds(roomId: string): Bounds | undefined {
@@ -99,6 +103,27 @@ export class GameMap {
   setScale(scale: number): void {
     this.scale = scale;
   }
+
+  applyBakedDimensions(widthTiles: number, heightTiles: number, tileSize: number): void {
+    this.data.width = widthTiles;
+    this.data.height = heightTiles;
+    this.scale = tileSize;
+  }
+
+  replaceData(data: MapData): void {
+    this.data = data;
+    this.scale = data.tileSize;
+  }
+}
+
+export async function loadMapData(path: string): Promise<MapData | null> {
+  try {
+    const res = await fetch(path);
+    if (!res.ok) return null;
+    return (await res.json()) as MapData;
+  } catch {
+    return null;
+  }
 }
 
 // Default map data (used before custom map is loaded)
@@ -107,25 +132,25 @@ export const DEFAULT_MAP: MapData = {
   width: 30,
   height: 20,
   tileSize: 16,
-  
+
   rooms: [
     {
       id: "cursor-room",
       name: "Cursor HQ",
-      x: 0,
-      y: 0,
+      x: 2,
+      y: 2,
       width: 10,
-      height: 14,
+      height: 11,
       color: "#0066ff",
-      agents: ["jarvis", "cursor", "bumblebee"],
+      agents: ["jarvis", "friday", "cursor", "cursor-grunt", "bumblebee"],
     },
     {
       id: "claude-room",
-      name: "Claude HQ", 
-      x: 20,
-      y: 0,
-      width: 10,
-      height: 14,
+      name: "Claude HQ",
+      x: 19,
+      y: 2,
+      width: 9,
+      height: 11,
       color: "#d97706",
       agents: ["claude", "claude-code", "claude-cowork"],
     },
@@ -137,52 +162,33 @@ export const DEFAULT_MAP: MapData = {
       width: 30,
       height: 6,
       color: "#2d5a27",
-      agents: ["friday", "grokbot", "gemini", "apple-intelligence"],
+      agents: ["grokbot", "gemini", "apple-intelligence"],
       isOutdoor: true,
     },
   ],
-  
+
   connections: [
-    { from: "cursor-room", to: "main-space", doorX: 5, doorY: 14 },
-    { from: "claude-room", to: "main-space", doorX: 25, doorY: 14 },
+    { from: "cursor-room", to: "main-space", doorX: 8, doorY: 13 },
+    { from: "claude-room", to: "main-space", doorX: 22, doorY: 13 },
   ],
-  
+
   spawnPoints: {
-    "jarvis": { room: "cursor-room", x: 5, y: 6 },
-    "cursor": { room: "cursor-room", x: 3, y: 8 },
-    "bumblebee": { room: "cursor-room", x: 7, y: 8 },
-    
-    "claude": { room: "claude-room", x: 25, y: 6 },
-    "claude-code": { room: "claude-room", x: 23, y: 8 },
-    "claude-cowork": { room: "claude-room", x: 27, y: 8 },
-    
-    "friday": { room: "main-space", x: 15, y: 17 },
-    "grokbot": { room: "main-space", x: 8, y: 17 },
-    "gemini": { room: "main-space", x: 12, y: 17 },
+    jarvis: { room: "cursor-room", x: 6, y: 7 },
+    friday: { room: "cursor-room", x: 7, y: 8 },
+    cursor: { room: "cursor-room", x: 6, y: 6 },
+    "cursor-grunt": { room: "cursor-room", x: 6, y: 6 },
+    bumblebee: { room: "cursor-room", x: 8, y: 9 },
+
+    claude: { room: "claude-room", x: 23, y: 7 },
+    "claude-code": { room: "claude-room", x: 21, y: 9 },
+    "claude-cowork": { room: "claude-room", x: 25, y: 9 },
+
+    grokbot: { room: "main-space", x: 8, y: 17 },
+    gemini: { room: "main-space", x: 12, y: 17 },
     "apple-intelligence": { room: "main-space", x: 22, y: 17 },
   },
-  
-  furniture: {
-    "cursor-room": [
-      { type: "desk", x: 2, y: 2 },
-      { type: "computer", x: 2, y: 1 },
-      { type: "desk", x: 6, y: 2 },
-      { type: "computer", x: 6, y: 1 },
-      { type: "server", x: 8, y: 4 },
-    ],
-    "claude-room": [
-      { type: "desk", x: 22, y: 2 },
-      { type: "computer", x: 22, y: 1 },
-      { type: "desk", x: 26, y: 2 },
-      { type: "computer", x: 26, y: 1 },
-      { type: "bookshelf", x: 28, y: 4 },
-    ],
-    "main-space": [
-      { type: "tree", x: 3, y: 16 },
-      { type: "tree", x: 27, y: 16 },
-      { type: "fountain", x: 15, y: 16 },
-    ],
-  },
+
+  furniture: {},
 };
 
 export const gameMap = new GameMap(DEFAULT_MAP);

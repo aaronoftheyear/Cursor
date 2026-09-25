@@ -3,87 +3,107 @@
   "style": "pokemon-gba",
   "tileSize": 32,
   "spriteSize": 32,
-  
   "agents": {
     "jarvis": {
       "name": "J.A.R.V.I.S.",
-      "sprite": "sprites/jarvis/walk.png",
-      "idle": "sprites/jarvis/idle.png",
-      "portrait": "sprites/jarvis/portrait.png"
+      "sprite": "sprites/jarvis.png",
+      "idle": "sprites/jarvis.png",
+      "portrait": "sprites/jarvis.png"
     },
     "friday": {
       "name": "F.R.I.D.A.Y.",
-      "sprite": "sprites/friday/walk.png",
-      "idle": "sprites/friday/idle.png",
-      "portrait": "sprites/friday/portrait.png"
+      "sprite": "sprites/friday.png",
+      "idle": "sprites/friday.png",
+      "portrait": "sprites/friday.png"
     },
     "bumblebee": {
       "name": "Bumblebee",
-      "sprite": "sprites/bumblebee/walk.png",
-      "idle": "sprites/bumblebee/idle.png",
-      "portrait": "sprites/bumblebee/portrait.png"
+      "sprite": "sprites/bumblebee.png",
+      "idle": "sprites/bumblebee.png",
+      "portrait": "sprites/bumblebee.png"
     },
     "cursor": {
       "name": "Cursor",
-      "sprite": "sprites/cursor/walk.png",
-      "idle": "sprites/cursor/idle.png",
-      "portrait": "sprites/cursor/portrait.png"
+      "sprite": "sprites/cursor_grunt01.png",
+      "idle": "sprites/cursor_grunt01.png",
+      "portrait": "sprites/cursor_grunt01.png"
+    },
+    "cursor-grunt": {
+      "name": "Cursor Grunt 2",
+      "sprite": "sprites/cursor_grunt02.png",
+      "idle": "sprites/cursor_grunt02.png",
+      "portrait": "sprites/cursor_grunt02.png"
     },
     "claude": {
       "name": "Claude",
-      "sprite": "sprites/claude/walk.png",
-      "idle": "sprites/claude/idle.png",
-      "portrait": "sprites/claude/portrait.png"
+      "sprite": "sprites/claude.png",
+      "idle": "sprites/claude.png",
+      "portrait": "sprites/claude.png",
+      "spriteFacing": "right"
     },
     "claude-code": {
       "name": "Claude Code",
-      "sprite": "sprites/claude-code/walk.png",
-      "idle": "sprites/claude-code/idle.png",
-      "portrait": "sprites/claude-code/portrait.png"
+      "sprite": "sprites/claude_code.png",
+      "idle": "sprites/claude_code.png",
+      "portrait": "sprites/claude_code.png",
+      "spriteFacing": "right"
     },
     "claude-cowork": {
       "name": "Claude Cowork",
-      "sprite": "sprites/claude-cowork/walk.png",
-      "idle": "sprites/claude-cowork/idle.png",
-      "portrait": "sprites/claude-cowork/portrait.png"
+      "sprite": "sprites/claude_cowork.png",
+      "idle": "sprites/claude_cowork.png",
+      "portrait": "sprites/claude_cowork.png",
+      "spriteFacing": "right"
     },
     "grokbot": {
       "name": "Grok",
-      "sprite": "sprites/grok/walk.png",
-      "idle": "sprites/grok/idle.png",
-      "portrait": "sprites/grok/portrait.png"
+      "sprite": "sprites/grok.png",
+      "idle": "sprites/grok.png",
+      "portrait": "sprites/grok.png"
     },
     "gemini": {
       "name": "Gemini",
-      "sprite": "sprites/gemini/walk.png",
-      "idle": "sprites/gemini/idle.png",
-      "portrait": "sprites/gemini/portrait.png"
+      "sprite": "sprites/gemini.png",
+      "idle": "sprites/gemini.png",
+      "portrait": "sprites/gemini.png"
     },
     "apple-intelligence": {
       "name": "Apple Intelligence",
-      "sprite": "sprites/apple/walk.png",
-      "idle": "sprites/apple/idle.png",
-      "portrait": "sprites/apple/portrait.png"
+      "sprite": "sprites/apple.png",
+      "idle": "sprites/apple.png",
+      "portrait": "sprites/apple.png"
+    },
+    "laya": {
+      "name": "Laya",
+      "sprite": "sprites/laya.png",
+      "idle": "sprites/laya.png",
+      "portrait": "sprites/laya.png"
     }
   },
-  
   "tileset": {
     "floor": "tiles/floor.png",
     "walls": "tiles/walls.png",
     "furniture": "tiles/furniture.png",
     "decorations": "tiles/decorations.png"
   },
-  
   "ui": {
     "textbox": "ui/textbox.png",
     "menu": "ui/menu.png",
     "icons": "ui/icons.png",
     "taskPanel": "ui/task-panel.png"
   },
-  
   "map": {
-    "width": 20,
-    "height": 15,
-    "file": "maps/hq.json"
+    "width": 34,
+    "height": 23,
+    "tileSize": 32,
+    "file": "maps/hq.json",
+    "background": "maps/dashboard-v1-baked.png",
+    "overlay": "maps/dashboard-v1-overlay.png",
+    "collision": "maps/dashboard-v1-collision.json",
+    "collisionRev": "1790331069",
+    "walkover": "maps/dashboard-v1-walkover.png",
+    "actions": "maps/dashboard-v1-actions.json",
+    "mid": "maps/dashboard-v1-mid.png",
+    "wallsFront": "maps/dashboard-v1-walls-front.png"
   }
 }

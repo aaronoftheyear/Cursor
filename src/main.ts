@@ -1,5 +1,6 @@
 import { GameEngine } from './engine';
 import { orchestrator, RoutingResult } from './orchestrator';
+import { startLiveStatusSync } from './statusSync';
 import { Agent } from './types';
 
 class AIAgentDashboard {
@@ -28,6 +29,8 @@ class AIAgentDashboard {
     setInterval(() => this.updateClock(), 1000);
     setInterval(() => this.updateAgentList(), 500);
     setInterval(() => this.updateLayaStatus(), 5000);
+
+    startLiveStatusSync(this.engine, () => this.updateAgentList());
   }
   
   private setupUI(): void {
@@ -158,7 +161,9 @@ class AIAgentDashboard {
         container.appendChild(this.createAgentCard(coordinator, agents));
         
         // Show subagents indented under coordinator
-        const subagents = agents.filter(a => a.parentAgent === coordinator.id);
+        const subagents = agents.filter(
+          (a) => a.parentAgent === coordinator.id && a.visibleOnMap !== false
+        );
         subagents.forEach(subagent => {
           const subCard = this.createAgentCard(subagent, agents);
           subCard.style.marginLeft = '16px';
@@ -198,7 +203,7 @@ class AIAgentDashboard {
           <div class="agent-status ${agent.status}">${agent.status.toUpperCase()}</div>
         </div>
       </div>
-      ${agent.currentTask ? `<div style="font-size: 6px; color: #888; margin-top: 4px;">Working on: ${agent.currentTask.description.substring(0, 30)}...</div>` : ''}
+      ${agent.currentTask ? `<div style="font-size: 6px; color: #888; margin-top: 4px;">Working on: ${agent.currentTask.description.substring(0, 30)}...</div>` : agent.statusDetail ? `<div style="font-size: 6px; color: #6cf; margin-top: 4px;">${agent.statusDetail}</div>` : ''}
     `;
     
     card.addEventListener('click', () => {

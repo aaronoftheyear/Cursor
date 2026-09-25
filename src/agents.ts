@@ -1,7 +1,20 @@
 import { Agent } from './types';
 import { AGENT_SPRITES } from './sprites';
 
-export const AGENT_CONFIGS: Omit<Agent, 'x' | 'y' | 'targetX' | 'targetY' | 'frame' | 'frameTimer' | 'currentTask'>[] = [
+export const AGENT_CONFIGS: Omit<
+  Agent,
+  | 'x'
+  | 'y'
+  | 'targetX'
+  | 'targetY'
+  | 'frame'
+  | 'frameTimer'
+  | 'idleFrame'
+  | 'idleTimer'
+  | 'currentTask'
+  | 'locomotion'
+  | 'visibleOnMap'
+>[] = [
   // === CURSOR PROJECT COORDINATORS ===
   {
     id: 'jarvis',
@@ -14,12 +27,12 @@ export const AGENT_CONFIGS: Omit<Agent, 'x' | 'y' | 'targetX' | 'targetY' | 'fra
     specialties: ['local', 'coordinator', 'cursor', 'development', 'on-device', 'planning', 'delegation'],
     sprite: AGENT_SPRITES.stand,
     role: 'coordinator',
-    subAgents: ['cursor'],
+    subAgents: ['cursor', 'cursor-grunt'],
   },
   {
     id: 'friday',
     name: 'F.R.I.D.A.Y.',
-    description: 'Female Replacement Intelligent Digital Assistant Youth. Cloud troubleshooting coordinator. Manages cloud agents for debugging, CI/CD, and infrastructure issues.',
+    description: 'Female Replacement Intelligent Digital Assistant Youth. Cursor HQ cloud coordinator. Manages Bumblebee and cloud troubleshooting, CI/CD, and infrastructure.',
     color: '#00bfff',
     secondaryColor: '#1e90ff',
     status: 'idle',
@@ -46,13 +59,26 @@ export const AGENT_CONFIGS: Omit<Agent, 'x' | 'y' | 'targetX' | 'targetY' | 'fra
   // === STANDALONE AGENTS ===
   {
     id: 'cursor',
-    name: 'Cursor',
-    description: 'AI-powered code editor agent. Great for coding tasks, refactoring, and IDE integrations. Reports to J.A.R.V.I.S.',
+    name: 'Cursor Grunt',
+    description: 'Cursor HQ grunt. Handles coding tasks, refactoring, and IDE work. Reports to J.A.R.V.I.S.',
     color: '#00d4ff',
     secondaryColor: '#0066ff',
     status: 'idle',
     direction: 'right',
     specialties: ['coding', 'refactoring', 'ide', 'code-completion', 'debugging', 'file-editing'],
+    sprite: AGENT_SPRITES.stand,
+    role: 'subagent',
+    parentAgent: 'jarvis',
+  },
+  {
+    id: 'cursor-grunt',
+    name: 'Cursor Grunt 2',
+    description: 'Second Cursor HQ grunt. Handles file edits, refactors, and local coding tasks. Reports to J.A.R.V.I.S.',
+    color: '#7dd3fc',
+    secondaryColor: '#0369a1',
+    status: 'idle',
+    direction: 'left',
+    specialties: ['coding', 'refactoring', 'ide', 'file-editing', 'local'],
     sprite: AGENT_SPRITES.stand,
     role: 'subagent',
     parentAgent: 'jarvis',
@@ -129,6 +155,18 @@ export const AGENT_CONFIGS: Omit<Agent, 'x' | 'y' | 'targetX' | 'targetY' | 'fra
     sprite: AGENT_SPRITES.stand,
     role: 'agent',
   },
+  {
+    id: 'laya',
+    name: 'Laya',
+    description: 'Main-space router and operator. Owns the workbench; other agents visit her terminal to coordinate.',
+    color: '#f472b6',
+    secondaryColor: '#be185d',
+    status: 'idle',
+    direction: 'down',
+    specialties: ['routing', 'orchestration', 'main-space', 'coordination', 'dispatch'],
+    sprite: AGENT_SPRITES.stand,
+    role: 'coordinator',
+  },
 ];
 
 export function createAgents(canvasWidth: number, canvasHeight: number): Agent[] {
@@ -139,6 +177,7 @@ export function createAgents(canvasWidth: number, canvasHeight: number): Agent[]
     const x = margin + Math.random() * (canvasWidth - margin * 2);
     const y = margin + Math.random() * (canvasHeight - margin * 2);
     
+    const deployOnDemand = config.id === 'cursor' || config.id === 'cursor-grunt' || config.id === 'bumblebee';
     agents.push({
       ...config,
       x,
@@ -147,7 +186,11 @@ export function createAgents(canvasWidth: number, canvasHeight: number): Agent[]
       targetY: y,
       frame: 0,
       frameTimer: 0,
+      idleFrame: 0,
+      idleTimer: 0,
       currentTask: null,
+      visibleOnMap: !deployOnDemand,
+      locomotion: 'stand',
     });
   });
   

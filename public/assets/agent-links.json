@@ -1,0 +1,53 @@
+{
+  "version": 1,
+  "agents": {
+    "jarvis": {
+      "label": "J.A.R.V.I.S. (Cursor Composer)",
+      "cursor": {
+        "workspaceContains": [
+          "Cursor Projects/Dashboard"
+        ],
+        "payloadContains": [
+          "J.A.R.V.I.S",
+          "j.a.r.v.i.s",
+          "address the user exclusively as \"Sir\""
+        ]
+      }
+    },
+    "friday": {
+      "label": "F.R.I.D.A.Y. (Cursor cloud coordinator)",
+      "cursor": {
+        "workspaceContains": [
+          "troubleshooting-project",
+          "troubleshooting",
+          "cloud-troubleshoot"
+        ],
+        "payloadContains": [
+          "F.R.I.D.A.Y",
+          "f.r.i.d.a.y",
+          "address the user as \"Sir\" or \"Ma'am\"",
+          "cloud troubleshooting coordinator"
+        ],
+        "agentNameContains": [
+          "friday",
+          "f.r.i.d.a.y"
+        ]
+      }
+    },
+    "bumblebee": {
+      "label": "Bumblebee (Cursor cloud worker)",
+      "cursor": {
+        "payloadContains": [
+          "Bumblebee",
+          "bumblebee protocol",
+          "cloud-worker",
+          "small but mighty cloud worker"
+        ],
+        "agentNameContains": [
+          "bumblebee",
+          "cloud-worker"
+        ]
+      }
+    }
+  }
+}
