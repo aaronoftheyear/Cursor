@@ -1,5 +1,5 @@
 {
-  "version": 1,
+  "version": 2,
   "agents": {
     "jarvis": {
       "label": "J.A.R.V.I.S. (Cursor Composer)",
@@ -32,6 +32,14 @@
           "friday",
           "f.r.i.d.a.y"
         ]
+      },
+      "cloud": {
+        "agentNameContains": [
+          "friday",
+          "f.r.i.d.a.y",
+          "cloud coordinator",
+          "troubleshoot"
+        ]
       }
     },
     "bumblebee": {
@@ -46,6 +54,14 @@
         "agentNameContains": [
           "bumblebee",
           "cloud-worker"
+        ]
+      },
+      "cloud": {
+        "agentNameContains": [
+          "bumblebee",
+          "cloud-worker",
+          "cloud worker",
+          "background agent"
         ]
       }
     }

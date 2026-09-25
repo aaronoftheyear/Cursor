@@ -237,6 +237,61 @@ For a Grok-based desktop assistant, add these calls:
 
 The status file is written to `.dashboard/external-agents.json` and is not tracked by git.
 
+## Cloud Agent Status (F.R.I.D.A.Y. & Bumblebee)
+
+F.R.I.D.A.Y. (cloud coordinator) and Bumblebee (cloud worker) run as Cursor cloud/background agents, so local Cursor hooks never fire for them. The dashboard includes a server-side poller that queries Cursor's Cloud Agents API to show their live status.
+
+### Setup
+
+1. **Get an API key** from [cursor.com/dashboard → API Keys](https://cursor.com/dashboard)
+2. **Create `.env.local`** in the project root:
+   ```bash
+   cp .env.local.example .env.local
+   ```
+3. **Add your key** to `.env.local`:
+   ```
+   CURSOR_API_KEY=crsr_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+   ```
+4. **Restart the dev server** to pick up the new environment variable
+
+### How It Works
+
+1. The Vite dev server polls `https://api.cursor.com/v1/agents` every 30 seconds
+2. Cloud agents are matched to avatars using `cloud.agentNameContains` rules in `public/assets/agent-links.json`
+3. Run status is mapped: `RUNNING`/`CREATING` → working, `FINISHED`/`ERROR`/etc → idle
+4. Cloud status is merged with local hook status (local hooks take priority if both are active)
+
+### Matching Rules
+
+Edit `public/assets/agent-links.json` to customize which cloud agents map to which avatars:
+
+```json
+{
+  "friday": {
+    "cloud": {
+      "agentNameContains": ["friday", "f.r.i.d.a.y", "cloud coordinator"]
+    }
+  },
+  "bumblebee": {
+    "cloud": {
+      "agentNameContains": ["bumblebee", "cloud-worker", "background agent"]
+    }
+  }
+}
+```
+
+### Graceful Degradation
+
+When no `CURSOR_API_KEY` is set, cloud agent polling is silently disabled. The dashboard continues to work for local agents (J.A.R.V.I.S.) and external agents (Grok).
+
+## Status Self-Healing
+
+The dashboard automatically recovers from stuck agent statuses:
+
+- **Stale timeout**: If an agent is marked "working" but no hook events arrive for 5 minutes, it resets to idle
+- **Session reconciliation**: If `agentSessions` count is 0 but status is "working", the agent resets to idle
+- **Dedupe protection**: In the Dashboard workspace, both project hooks and global hooks run—the script deduplicates to count each event only once
+
 ## License
 
 MIT
