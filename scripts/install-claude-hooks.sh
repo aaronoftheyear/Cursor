@@ -180,8 +180,9 @@ case "$ACTION" in
       exit 1
     fi
     
-    # Check if our hook is installed
-    python3 - "$CLAUDE_SETTINGS" "$HOOK_SCRIPT" << 'PYTHON_CHECK'
+    # Check if our hook is installed (use || true to prevent set -e from exiting)
+    check_result=0
+    python3 - "$CLAUDE_SETTINGS" "$HOOK_SCRIPT" << 'PYTHON_CHECK' || check_result=$?
 import json
 import sys
 
@@ -210,13 +211,12 @@ for event_groups in hooks.values():
             continue
         for hook in group_hooks:
             if isinstance(hook, dict) and hook_script in hook.get("command", ""):
-                print("found")
                 sys.exit(0)
 
 sys.exit(1)
 PYTHON_CHECK
 
-    if [[ $? -eq 0 ]]; then
+    if [[ $check_result -eq 0 ]]; then
       echo "✓ Claude Code hooks are installed"
       exit 0
     else

@@ -481,6 +481,12 @@ def is_github_shell_command(cmd: str) -> bool:
     
     Splits on &&, ;, | to find actual command words, avoiding false positives
     like "echo high score" matching "gh ".
+    
+    Handles:
+    - cd /tmp && gh pr list
+    - sudo gh pr view
+    - FOO=1 gh pr view (env var assignment prefix)
+    - git -C repo status (git with options before subcommand)
     """
     if not cmd or not isinstance(cmd, str):
         return False
@@ -494,35 +500,53 @@ def is_github_shell_command(cmd: str) -> bool:
         if not segment:
             continue
         
-        # Get the first word (the command itself), handling leading whitespace/cd/etc
-        # e.g., "cd /tmp && gh pr list" -> segments ["cd /tmp", "gh pr list"]
         words = segment.split()
         if not words:
             continue
         
-        # The command is typically the first word, but handle common prefixes
-        cmd_word = words[0].lower()
-        
-        # Skip common shell prefixes to find the actual command
+        # Skip environment variable assignments (VAR=value) and common prefixes
         i = 0
-        while i < len(words) and words[i].lower() in ('cd', 'pushd', 'env', 'sudo', 'time', 'nice', 'nohup'):
-            i += 1
-            # For cd/pushd, skip the path argument too
-            if words[i - 1].lower() in ('cd', 'pushd') and i < len(words):
+        while i < len(words):
+            word = words[i].lower()
+            # Skip env var assignments like FOO=1 or FOO="bar"
+            if '=' in words[i] and not words[i].startswith('-'):
                 i += 1
+                continue
+            # Skip common shell prefixes
+            if word in ('cd', 'pushd', 'env', 'sudo', 'time', 'nice', 'nohup'):
+                i += 1
+                # For cd/pushd, skip the path argument too
+                if word in ('cd', 'pushd') and i < len(words) and not words[i].startswith('-'):
+                    i += 1
+                continue
+            break
         
-        if i < len(words):
-            cmd_word = words[i].lower()
+        if i >= len(words):
+            continue
+        
+        cmd_word = words[i].lower()
         
         # Check for gh CLI (must be the command word, not substring)
         if cmd_word == 'gh':
             return True
         
         # Check for git operations (git must be the command word)
-        if cmd_word == 'git' and len(words) > i + 1:
-            git_subcommand = words[i + 1].lower()
-            if git_subcommand in ('push', 'pull', 'fetch', 'clone', 'commit', 'status'):
-                return True
+        if cmd_word == 'git':
+            # Find the subcommand, skipping any options like -C, --git-dir, etc.
+            j = i + 1
+            while j < len(words):
+                if words[j].startswith('-'):
+                    # Skip option and its argument if it takes one
+                    if words[j] in ('-C', '-c', '--git-dir', '--work-tree'):
+                        j += 2  # skip option and its value
+                    else:
+                        j += 1  # skip just the option
+                else:
+                    # Found the subcommand
+                    git_subcommand = words[j].lower()
+                    if git_subcommand in ('push', 'pull', 'fetch', 'clone', 'commit', 'status'):
+                        return True
+                    break
     
     return False
 
