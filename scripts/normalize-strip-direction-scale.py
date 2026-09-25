@@ -4,7 +4,10 @@ Normalize 144x32 avatar strips so every frame uses the same character height.
 
 The converter bottom-aligns each frame's bbox independently, so side-facing
 cells often end up taller than down/up. The renderer draws the full 16x32 cell
-at a fixed size, which makes side-facing avatars look larger.
+at a fixed displayScale for every direction (left uses the same dest rect as
+down; right mirrors that rect). Taller opaque pixels in the side column therefore
+made every avatar look larger when facing/walking left — not a separate flip
+scale in the renderer.
 
 This script scales each frame's content uniformly to the sheet's max content
 height, feet still on the bottom row of the 16x32 cell.
