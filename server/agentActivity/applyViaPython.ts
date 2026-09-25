@@ -1,6 +1,6 @@
 /**
  * Apply hook-shaped events through the existing Python status pipeline.
- * Bounded concurrency + coalescing so log replay cannot fork thousands of processes.
+ * Per-agent serialization preserves order; global cap limits total concurrency.
  */
 
 import { spawn } from 'node:child_process'
@@ -14,22 +14,35 @@ export function statusPythonPath(projectRoot: string): string {
   return path.join(projectRoot, '.cursor', 'hooks', 'update-dashboard-status.py')
 }
 
-let running = 0
-const pending: Array<{ projectRoot: string; event: AgentEvent; key: string }> = []
+type Job = { projectRoot: string; event: AgentEvent; key: string }
+
+let globalRunning = 0
+const perAgentQueue = new Map<string, Job[]>()
+const perAgentRunning = new Set<string>()
 let loggedSpawnError = false
 
 function coalesceKey(event: AgentEvent): string {
-  return `${event.agentId}:${event.kind}:${event.activity || ''}:${event.cursorEvent || ''}`
+  return `${event.kind}:${event.activity || ''}:${event.cursorEvent || ''}`
 }
 
 function drainQueue(): void {
-  while (running < MAX_CONCURRENT && pending.length > 0) {
-    const job = pending.shift()!
-    running++
-    runOne(job.projectRoot, job.event, () => {
-      running--
-      drainQueue()
-    })
+  while (globalRunning < MAX_CONCURRENT) {
+    let started = false
+    for (const [agentId, queue] of perAgentQueue) {
+      if (!queue.length || perAgentRunning.has(agentId)) continue
+      const job = queue.shift()!
+      if (!queue.length) perAgentQueue.delete(agentId)
+      perAgentRunning.add(agentId)
+      globalRunning++
+      runOne(job.projectRoot, job.event, () => {
+        perAgentRunning.delete(agentId)
+        globalRunning--
+        drainQueue()
+      })
+      started = true
+      break
+    }
+    if (!started) break
   }
 }
 
@@ -84,19 +97,34 @@ function runOne(
 }
 
 export function applyEventViaPython(projectRoot: string, event: AgentEvent): void {
+  const agentId = event.agentId || 'default'
   const key = coalesceKey(event)
-  const existingIdx = pending.findIndex((j) => j.key === key)
+  const queue = perAgentQueue.get(agentId) || []
+  const existingIdx = queue.findIndex((j) => j.key === key)
   if (existingIdx >= 0) {
-    pending[existingIdx] = { projectRoot, event, key }
+    queue[existingIdx] = { projectRoot, event, key }
   } else {
-    pending.push({ projectRoot, event, key })
+    queue.push({ projectRoot, event, key })
   }
+  perAgentQueue.set(agentId, queue)
   drainQueue()
 }
 
 /** Test helper */
 export function resetPythonApplyQueue(): void {
-  pending.length = 0
-  running = 0
+  perAgentQueue.clear()
+  perAgentRunning.clear()
+  globalRunning = 0
   loggedSpawnError = false
+}
+
+/** Test helper: wait until queue is idle */
+export function waitForPythonApplyIdle(): Promise<void> {
+  return new Promise((resolve) => {
+    const tick = () => {
+      if (globalRunning === 0 && perAgentQueue.size === 0) resolve()
+      else setTimeout(tick, 10)
+    }
+    tick()
+  })
 }

@@ -21,6 +21,7 @@ export type AgentEventKind =
   | 'sessionStart'
   | 'sessionEnd'
   | 'turnEnd'
+  | 'userPrompt'
   | 'activity'
   | 'permission'
   | 'idle'

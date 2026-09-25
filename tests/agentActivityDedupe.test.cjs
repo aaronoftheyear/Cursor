@@ -25,24 +25,28 @@ function test(name, fn) {
 
 const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'dedupe-test-'));
 
-const script = `
-  import { registerHookSession, shouldApplyLogFallbackEvent, isHookOwnedSession } from '${PROJECT_ROOT}/server/agentActivity/hookDedupe.ts';
+function loadDedupeResult() {
+  const script = `
+    import { registerHookSession, shouldApplyLogFallbackEvent, isHookOwnedSession } from '${PROJECT_ROOT}/server/agentActivity/hookDedupe.ts';
 
-  const root = '${tempDir.replace(/'/g, "\\'")}';
-  registerHookSession(root, 'sess-hook-1');
+    const root = '${tempDir.replace(/'/g, "\\'")}';
+    registerHookSession(root, 'sess-hook-1');
 
-  const blocked = shouldApplyLogFallbackEvent(root, {
-    id: 'x', ts: Date.now(), source: 'claude-session-log', providerId: 'claude-session-log',
-    agentId: 'claude-code', kind: 'activity', sessionId: 'sess-hook-1', status: 'working', activity: 'reading',
-  });
-  const allowed = shouldApplyLogFallbackEvent(root, {
-    id: 'y', ts: Date.now(), source: 'claude-session-log', providerId: 'claude-session-log',
-    agentId: 'claude-code', kind: 'activity', sessionId: 'sess-log-only', status: 'working', activity: 'reading',
-  });
-  console.log(JSON.stringify({ blocked, allowed, owned: isHookOwnedSession(root, 'sess-hook-1') }));
-`;
+    const blocked = shouldApplyLogFallbackEvent(root, {
+      id: 'x', ts: Date.now(), source: 'claude-session-log', providerId: 'claude-session-log',
+      agentId: 'claude-code', kind: 'activity', sessionId: 'sess-hook-1', status: 'working', activity: 'reading',
+    });
+    const allowed = shouldApplyLogFallbackEvent(root, {
+      id: 'y', ts: Date.now(), source: 'claude-session-log', providerId: 'claude-session-log',
+      agentId: 'claude-code', kind: 'activity', sessionId: 'sess-log-only', status: 'working', activity: 'reading',
+    });
+    console.log(JSON.stringify({ blocked, allowed, owned: isHookOwnedSession(root, 'sess-hook-1') }));
+  `;
+  const out = execFileSync(tsxBin, ['-e', script], { encoding: 'utf-8' }).trim();
+  return JSON.parse(out.split('\n').filter(Boolean).pop());
+}
 
-const result = JSON.parse(execFileSync(tsxBin, ['-e', script], { encoding: 'utf-8' }));
+const result = loadDedupeResult();
 
 test('hook-owned session blocks log fallback', () => {
   if (result.blocked !== false) throw new Error('expected blocked');

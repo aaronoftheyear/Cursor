@@ -133,7 +133,7 @@ test('recent file at first sight starts at EOF with zero events', () => {
   }
 });
 
-test('half-written line then completion emits exactly one turnEnd', () => {
+test('half-written line on same provider instance emits exactly one turnEnd', () => {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'mut-half-'));
   try {
     const logFile = path.join(tmp, 'half.jsonl');
@@ -157,40 +157,114 @@ test('half-written line then completion emits exactly one turnEnd', () => {
       console.log(JSON.stringify({ ok: true }));
     `);
 
-    const partial = fullLine.slice(0, 24);
-    fs.appendFileSync(logFile, partial);
-    const mid = runEval(`
-      import { ClaudeSessionLogProvider } from '${PROJECT_ROOT}/server/agentActivity/providers/claudeSessionLogProvider.ts';
-      const events = [];
-      const p = new ClaudeSessionLogProvider(${JSON.stringify(tmp)}, {
-        projectsRoot: ${JSON.stringify(tmp)},
-        offsetsFile: ${JSON.stringify(offsets)},
-      });
-      p.start((e) => events.push(e));
-      p.pollNow();
-      p.stop();
-      console.log(JSON.stringify({ count: events.length }));
-    `);
-    if (mid.count !== 0) throw new Error(`partial line must emit 0 events, got ${mid.count}`);
+    const runner = path.join(tmp, 'half-runner.mts');
+    fs.writeFileSync(
+      runner,
+      `
+import fs from 'node:fs';
+import { ClaudeSessionLogProvider } from '${PROJECT_ROOT}/server/agentActivity/providers/claudeSessionLogProvider.ts';
 
-    fs.appendFileSync(logFile, fullLine.slice(24) + '\n');
-    fs.utimesSync(logFile, new Date(), new Date());
+const logFile = ${JSON.stringify(logFile)};
+const fullLine = ${JSON.stringify(fullLine)};
+const events: import('${PROJECT_ROOT}/server/agentActivity/types.ts').AgentEvent[] = [];
+const p = new ClaudeSessionLogProvider(${JSON.stringify(tmp)}, {
+  projectsRoot: ${JSON.stringify(tmp)},
+  offsetsFile: ${JSON.stringify(offsets)},
+});
+p.start((e) => events.push(e));
 
-    const out = runEval(`
-      import { ClaudeSessionLogProvider } from '${PROJECT_ROOT}/server/agentActivity/providers/claudeSessionLogProvider.ts';
-      const events = [];
-      const p = new ClaudeSessionLogProvider(${JSON.stringify(tmp)}, {
-        projectsRoot: ${JSON.stringify(tmp)},
-        offsetsFile: ${JSON.stringify(offsets)},
-      });
-      p.start((e) => events.push(e));
-      p.pollNow();
-      p.stop();
-      const turnEnds = events.filter((e) => e.kind === 'turnEnd');
-      console.log(JSON.stringify({ turnEnds: turnEnds.length, total: events.length }));
-    `);
+const partial = fullLine.slice(0, 24);
+fs.appendFileSync(logFile, partial);
+p.pollNow();
+const afterPartial = events.length;
+
+fs.appendFileSync(logFile, fullLine.slice(24) + '\\n');
+p.pollNow();
+const turnEnds = events.filter((e) => e.kind === 'turnEnd').length;
+p.stop();
+console.log(JSON.stringify({ afterPartial, turnEnds, total: events.length }));
+`
+    );
+
+    const out = JSON.parse(
+      execFileSync(tsxBin, [runner], { encoding: 'utf-8', cwd: PROJECT_ROOT }).trim().split('\n').pop()
+    );
+    if (out.afterPartial !== 0) throw new Error(`partial poll expected 0 events, got ${out.afterPartial}`);
     if (out.turnEnds !== 1) throw new Error(`expected 1 turnEnd, got ${out.turnEnds}`);
     if (out.total !== 1) throw new Error(`expected exactly 1 event total, got ${out.total}`);
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('bash_progress records refresh permission timer (no false permission wait)', () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'mut-progress-'));
+  try {
+    const logFile = path.join(tmp, 'prog.jsonl');
+    const offsets = path.join(tmp, 'offsets.json');
+    fs.writeFileSync(logFile, '');
+    fs.utimesSync(logFile, new Date(), new Date());
+
+    runEval(`
+      import { ClaudeSessionLogProvider } from '${PROJECT_ROOT}/server/agentActivity/providers/claudeSessionLogProvider.ts';
+      const p = new ClaudeSessionLogProvider(${JSON.stringify(tmp)}, {
+        projectsRoot: ${JSON.stringify(tmp)},
+        offsetsFile: ${JSON.stringify(offsets)},
+      });
+      p.start(() => {});
+      p.stop();
+      console.log(JSON.stringify({ ok: true }));
+    `);
+
+    const bashLine = JSON.stringify({
+      type: 'assistant',
+      uuid: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',
+      message: {
+        content: [{ type: 'tool_use', id: 'bash-long', name: 'Bash', input: { command: 'npm test' } }],
+      },
+    });
+    fs.appendFileSync(logFile, bashLine + '\n');
+
+    const progressJson = JSON.stringify({
+      type: 'progress',
+      parentToolUseID: 'bash-long',
+      data: { type: 'bash_progress', output: 'running...' },
+    });
+
+    const runner = path.join(tmp, 'prog-runner.mts');
+    fs.writeFileSync(
+      runner,
+      `
+import fs from 'node:fs';
+import { ClaudeSessionLogProvider } from '${PROJECT_ROOT}/server/agentActivity/providers/claudeSessionLogProvider.ts';
+
+const logFile = ${JSON.stringify(logFile)};
+const progressLine = ${JSON.stringify(progressJson + '\\n')};
+const events: import('${PROJECT_ROOT}/server/agentActivity/types.ts').AgentEvent[] = [];
+const p = new ClaudeSessionLogProvider(${JSON.stringify(tmp)}, {
+  projectsRoot: ${JSON.stringify(tmp)},
+  offsetsFile: ${JSON.stringify(offsets)},
+  permissionTimerMs: 5000,
+});
+p.start((e) => events.push(e));
+p.pollNow();
+
+for (let i = 0; i < 8; i++) {
+  fs.appendFileSync(logFile, progressLine);
+  p.pollNow();
+}
+
+await new Promise((r) => setTimeout(r, 250));
+p.stop();
+const perm = events.filter((e) => e.kind === 'permission').length;
+console.log(JSON.stringify({ perm }));
+`
+    );
+
+    const out = JSON.parse(
+      execFileSync(tsxBin, [runner], { encoding: 'utf-8', cwd: PROJECT_ROOT }).trim().split('\n').pop()
+    );
+    if (out.perm !== 0) throw new Error(`expected no permission event, got ${out.perm}`);
   } finally {
     fs.rmSync(tmp, { recursive: true, force: true });
   }

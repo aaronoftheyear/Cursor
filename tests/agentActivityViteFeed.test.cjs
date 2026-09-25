@@ -69,5 +69,40 @@ test('activity feed still running after configureServer completes', () => {
   if (out.closeHandlers < 1) throw new Error('close handler not registered');
 });
 
+test('httpServer close stops feed and session log polling', () => {
+  const script = `
+    import viteConfig from '${PROJECT_ROOT}/vite.config.ts';
+    import { getDashboardActivityFeedForTests } from '${PROJECT_ROOT}/vite.config.ts';
+
+    const config = viteConfig({ mode: 'development', command: 'serve' });
+    const plugin = config.plugins.find((p) => p && p.name === 'dashboard-live-status');
+    const closeHandlers = [];
+    const mockServer = {
+      middlewares: { use() {} },
+      httpServer: {
+        once(ev, fn) {
+          if (ev === 'close') closeHandlers.push(fn);
+        },
+      },
+    };
+    plugin.configureServer(mockServer);
+    const feed = getDashboardActivityFeedForTests();
+    const wasPolling = feed?.isSessionLogPolling() === true;
+    for (const fn of closeHandlers) fn();
+    const afterClose = {
+      running: feed?.isRunning() === true,
+      polling: feed?.isSessionLogPolling() === true,
+      refNull: getDashboardActivityFeedForTests() === null,
+    };
+    console.log(JSON.stringify({ wasPolling, afterClose }));
+  `;
+  const raw = execFileSync(tsxBin, ['--eval', script], { encoding: 'utf-8', cwd: PROJECT_ROOT });
+  const out = JSON.parse(raw.trim().split('\n').filter(Boolean).pop());
+  if (!out.wasPolling) throw new Error('expected polling before close');
+  if (out.afterClose.running) throw new Error('feed should not run after close');
+  if (out.afterClose.polling) throw new Error('poller should stop after close');
+  if (!out.afterClose.refNull) throw new Error('feed ref should be cleared');
+});
+
 console.log(`\n=== Vite activity feed: ${passed} passed, ${failed} failed ===\n`);
 process.exit(failed > 0 ? 1 : 0);

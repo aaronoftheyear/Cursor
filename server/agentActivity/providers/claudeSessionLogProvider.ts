@@ -36,7 +36,6 @@ export class ClaudeSessionLogProvider implements AgentActivityProvider {
   private timer: ReturnType<typeof setInterval> | null = null
   private emit: ((e: AgentEvent) => void) | null = null
   private offsets = new Map<string, { offset: number; lastSize: number }>()
-  private partialLines = new Map<string, string>()
   private sessionState = new Map<string, ClaudeJsonlSessionState>()
   private permissionTimers = new Map<string, ReturnType<typeof setTimeout>>()
   private offsetsDirty = false
@@ -183,10 +182,8 @@ export class ClaudeSessionLogProvider implements AgentActivityProvider {
 
     if (saved && stat.size < saved.lastSize) {
       offset = 0
-      this.partialLines.delete(filePath)
     } else if (stat.size < offset) {
       offset = 0
-      this.partialLines.delete(filePath)
     }
 
     if (stat.size === offset) {
@@ -200,7 +197,6 @@ export class ClaudeSessionLogProvider implements AgentActivityProvider {
       fs.closeSync(pfd)
       if (probe[0] !== 0x7b) {
         offset = 0
-        this.partialLines.delete(filePath)
       }
     }
 
@@ -213,8 +209,7 @@ export class ClaudeSessionLogProvider implements AgentActivityProvider {
     fs.closeSync(fd)
 
     const startOffset = offset
-    let chunk = (this.partialLines.get(filePath) || '') + buf.toString('utf-8')
-    this.partialLines.delete(filePath)
+    const chunk = buf.toString('utf-8')
 
     const parts = chunk.split('\n')
     let incomplete = ''
@@ -246,10 +241,6 @@ export class ClaudeSessionLogProvider implements AgentActivityProvider {
       endOfCompleteLines = lineStart
     }
 
-    if (incomplete) {
-      this.partialLines.set(filePath, incomplete)
-    }
-
     const newOffset = incomplete ? endOfCompleteLines : stat.size
     const prev = this.offsets.get(filePath)
     if (!prev || prev.offset !== newOffset || prev.lastSize !== stat.size) {
@@ -265,7 +256,6 @@ export class ClaudeSessionLogProvider implements AgentActivityProvider {
       if (!live.has(f)) {
         this.knownFiles.delete(f)
         this.offsets.delete(f)
-        this.partialLines.delete(f)
         this.offsetsDirty = true
       }
     }

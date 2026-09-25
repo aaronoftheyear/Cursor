@@ -5,12 +5,16 @@
 
 const fs = require('fs');
 const path = require('path');
-
 const TTL_MS = 24 * 60 * 60 * 1000;
-const MAX_REGISTER_ATTEMPTS = 5;
+const LOCK_MAX_ATTEMPTS = 12;
+const LOCK_STALE_MS = 5000;
 
 function hookSessionsPath(projectRoot) {
   return path.join(projectRoot, '.dashboard', 'hook-sessions.json');
+}
+
+function lockPath(projectRoot) {
+  return path.join(projectRoot, '.dashboard', 'hook-sessions.lock');
 }
 
 function pruneSessions(sessions) {
@@ -41,18 +45,50 @@ function atomicWrite(file, text) {
   fs.renameSync(tmp, file);
 }
 
+function acquireLock(projectRoot) {
+  const lock = lockPath(projectRoot);
+  fs.mkdirSync(path.dirname(lock), { recursive: true });
+  for (let attempt = 0; attempt < LOCK_MAX_ATTEMPTS; attempt++) {
+    try {
+      const fd = fs.openSync(lock, 'wx');
+      fs.writeFileSync(fd, String(process.pid));
+      fs.closeSync(fd);
+      return () => {
+        try {
+          fs.unlinkSync(lock);
+        } catch {
+          /* ignore */
+        }
+      };
+    } catch (err) {
+      if (err && err.code === 'EEXIST') {
+        try {
+          const st = fs.statSync(lock);
+          if (Date.now() - st.mtimeMs > LOCK_STALE_MS) fs.unlinkSync(lock);
+        } catch {
+          /* ignore */
+        }
+        continue;
+      }
+    }
+  }
+  return null;
+}
+
 function registerHookSession(projectRoot, sessionId) {
   if (!sessionId) return;
   const file = hookSessionsPath(projectRoot);
-  for (let attempt = 0; attempt < MAX_REGISTER_ATTEMPTS; attempt++) {
+  for (let attempt = 0; attempt < LOCK_MAX_ATTEMPTS; attempt++) {
+    const release = acquireLock(projectRoot);
+    if (!release) continue;
     try {
       const reg = loadRegistry(projectRoot);
       reg.sessions[sessionId] = { lastHookAt: Date.now() };
       pruneSessions(reg.sessions);
       atomicWrite(file, JSON.stringify(reg, null, 2) + '\n');
       return;
-    } catch {
-      /* retry */
+    } finally {
+      release();
     }
   }
 }

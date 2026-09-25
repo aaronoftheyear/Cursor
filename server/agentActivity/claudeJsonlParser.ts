@@ -143,8 +143,15 @@ export function parseClaudeJsonlLine(
   }
 
   if (type === 'progress') {
-    const subtype = record.subtype
-    if (subtype === 'bash_progress' || record.tool_use_id) {
+    const data = record.data as { type?: string } | undefined
+    const dataType = data && typeof data.type === 'string' ? data.type : ''
+    const hasToolLink =
+      typeof record.parentToolUseID === 'string' ||
+      typeof record.parentToolUseId === 'string' ||
+      typeof record.toolUseID === 'string' ||
+      typeof record.toolUseId === 'string' ||
+      typeof record.tool_use_id === 'string'
+    if (dataType === 'bash_progress' || dataType === 'mcp_progress' || hasToolLink) {
       refreshPermissionTimer = true
     }
     return { events, schedulePermissionTimer, cancelPermissionTimer, refreshPermissionTimer }
@@ -231,6 +238,15 @@ export function parseClaudeJsonlLine(
     }
     if (userHasTextPrompt(content)) {
       events.push(...maybeSessionStart(state, ctx, record))
+      events.push({
+        ...base,
+        id: blockEventId(ctx, record, 'userPrompt'),
+        kind: 'userPrompt',
+        status: 'working',
+        activity: 'planning',
+        activityDepth: 'brief',
+        detail: 'Claude Code — new prompt',
+      })
       state.hadToolsInTurn = false
     }
     return { events, schedulePermissionTimer, cancelPermissionTimer, refreshPermissionTimer }
