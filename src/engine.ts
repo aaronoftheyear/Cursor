@@ -30,7 +30,7 @@ import {
   truncatePath,
 } from './npcMotion';
 import {
-  buildSortedRenderQueue,
+  executeRenderPasses,
   AgentRenderInfo,
   TileRenderInfo,
 } from './renderQueue';
@@ -954,31 +954,14 @@ export class GameEngine {
         draw: () => this.renderer.drawWallsFrontTile(layout, x, y),
       }));
 
-    // PASS 1: Draw furniture-low (walkover) tiles first - these are under shadows
-    for (const tile of walkoverTiles) {
-      tile.draw();
-    }
-
-    // PASS 2: Draw ALL shadows - always under furniture-mid and wall-front
-    for (const agent of agents) {
-      agent.drawShadow();
-    }
-
-    // PASS 3: Depth-sorted queue (furniture-mid, avatars only)
-    // Shadows are NOT in this queue, so they're always underneath
-    // Wall-front is drawn in a separate pass to be always on top
-    const queue = buildSortedRenderQueue(agents, [], midTiles, []);
-    for (const item of queue) {
-      item.draw();
-    }
-
-    // PASS 4: Wall-front tiles - ALWAYS on top of avatars and shadows
-    for (const tile of wallsFrontTiles) {
-      tile.draw();
-    }
-
-    // PASS 5: Overlay (furniture-high) is always drawn on top of everything
-    this.renderer.drawMapOverlay(layout);
+    // Execute render passes (see renderQueue.ts for pass order)
+    executeRenderPasses(
+      agents,
+      walkoverTiles,
+      midTiles,
+      wallsFrontTiles,
+      () => this.renderer.drawMapOverlay(layout)
+    );
 
     if (this.state.selectedAgent) {
       const agent = this.state.agents.find((a) => a.id === this.state.selectedAgent);
