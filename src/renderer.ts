@@ -342,7 +342,10 @@ export class Renderer {
     sprite: LoadedSprite,
     size: { width: number; height: number }
   ): void {
-    const walking = agent.locomotion === 'walk';
+    // Use both locomotion state AND actual position check to prevent
+    // showing walking frames when the agent is stationary. This catches
+    // edge cases where locomotion='walk' isn't properly reset to 'stand'.
+    const walking = agent.locomotion === 'walk' && this.isAgentMoving(agent);
     const frame = walking
       ? getSpriteFrame(sprite, agent.direction, agent.frame, getAgentSpriteMirror(agent.id), 'walk')
       : getSpriteFrame(sprite, agent.direction, 0, getAgentSpriteMirror(agent.id), 'idle');
@@ -379,7 +382,8 @@ export class Renderer {
   }
 
   private getSpriteForAgent(agent: Agent): number[][] {
-    if (agent.locomotion === 'walk') {
+    // Same fix as drawCustomSprite: check actual movement, not just locomotion state
+    if (agent.locomotion === 'walk' && this.isAgentMoving(agent)) {
       return agent.frame % 2 === 0 ? AGENT_SPRITES.walk1 : AGENT_SPRITES.walk2;
     }
     return AGENT_SPRITES.stand;
