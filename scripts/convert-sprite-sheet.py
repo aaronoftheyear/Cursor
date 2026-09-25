@@ -79,41 +79,45 @@ def get_bounding_box(img: Image.Image, x: int, y: int, w: int, h: int) -> tuple[
     return (min_x, min_y, max_x + 1, max_y + 1)
 
 
-def extract_frame(img: Image.Image, col: int, row: int, cell_w: float, cell_h: float) -> Image.Image:
-    """Extract a single frame from the input grid, centered in output cell."""
+def extract_frame_content(img: Image.Image, col: int, row: int, cell_w: float, cell_h: float) -> Image.Image | None:
+    """Crop opaque pixels for one source cell (no output frame yet)."""
     x = int(col * cell_w)
     y = int(row * cell_h)
     w = int(cell_w)
     h = int(cell_h)
-    
-    # Handle edge cases for last column/row
     if col == IN_COLS - 1:
         w = img.width - x
     if row == IN_ROWS - 1:
         h = img.height - y
-    
-    # Get bounding box of actual sprite content
     bbox = get_bounding_box(img, x, y, w, h)
     bx, by, bx2, by2 = bbox
     content_w = bx2 - bx
     content_h = by2 - by
-    
-    # Extract content
-    content = img.crop((x + bx, y + by, x + bx2, y + by2))
-    
-    # Create output frame
+    if content_w <= 0 or content_h <= 0:
+        return None
+    return img.crop((x + bx, y + by, x + bx2, y + by2))
+
+
+def compose_output_frame(content: Image.Image, norm_height: int) -> Image.Image:
+    """Scale content to norm_height (uniform), feet on bottom of 16x32 cell."""
     out_frame = Image.new('RGBA', (OUT_FRAME_W, OUT_FRAME_H), (0, 0, 0, 0))
-    
-    # Center horizontally, align feet to bottom
-    paste_x = (OUT_FRAME_W - content_w) // 2
-    paste_y = OUT_FRAME_H - content_h  # Feet at bottom
-    
-    # Clamp to frame bounds
-    paste_x = max(0, min(paste_x, OUT_FRAME_W - content_w))
-    paste_y = max(0, min(paste_y, OUT_FRAME_H - content_h))
-    
-    out_frame.paste(content, (paste_x, paste_y))
+    scale = norm_height / content.height
+    new_w = max(1, round(content.width * scale))
+    new_h = norm_height
+    resized = content.resize((new_w, new_h), Image.Resampling.NEAREST)
+    paste_x = (OUT_FRAME_W - new_w) // 2
+    paste_y = OUT_FRAME_H - new_h
+    paste_x = max(0, min(paste_x, OUT_FRAME_W - new_w))
+    paste_y = max(0, min(paste_y, OUT_FRAME_H - new_h))
+    out_frame.paste(resized, (paste_x, paste_y))
     return out_frame
+
+
+def extract_frame(img: Image.Image, col: int, row: int, cell_w: float, cell_h: float, norm_height: int) -> Image.Image:
+    content = extract_frame_content(img, col, row, cell_w, cell_h)
+    if content is None:
+        return Image.new('RGBA', (OUT_FRAME_W, OUT_FRAME_H), (0, 0, 0, 0))
+    return compose_output_frame(content, norm_height)
 
 
 def get_walk_cols(idle_col: int) -> tuple[int, int]:
@@ -146,20 +150,34 @@ def convert_sheet(input_path: str, output_path: str, side_facing: str = 'left', 
     # Input rows: 0=down, 1=side, 2=up
     # Output columns: [D-idle][D-w1][D-w2][U-idle][U-w1][U-w2][L-idle][L-w1][L-w2]
     
-    # Down row (input row 0)
-    frame_d_idle = extract_frame(img, idle_col, 0, cell_w, cell_h)
-    frame_d_walk1 = extract_frame(img, walk1_col, 0, cell_w, cell_h)
-    frame_d_walk2 = extract_frame(img, walk2_col, 0, cell_w, cell_h)
-    
-    # Up row (input row 2)
-    frame_u_idle = extract_frame(img, idle_col, 2, cell_w, cell_h)
-    frame_u_walk1 = extract_frame(img, walk1_col, 2, cell_w, cell_h)
-    frame_u_walk2 = extract_frame(img, walk2_col, 2, cell_w, cell_h)
-    
-    # Side row (input row 1)
-    frame_s_idle = extract_frame(img, idle_col, 1, cell_w, cell_h)
-    frame_s_walk1 = extract_frame(img, walk1_col, 1, cell_w, cell_h)
-    frame_s_walk2 = extract_frame(img, walk2_col, 1, cell_w, cell_h)
+    specs = [
+        (idle_col, 0),
+        (walk1_col, 0),
+        (walk2_col, 0),
+        (idle_col, 2),
+        (walk1_col, 2),
+        (walk2_col, 2),
+        (idle_col, 1),
+        (walk1_col, 1),
+        (walk2_col, 1),
+    ]
+    contents = [extract_frame_content(img, col, row, cell_w, cell_h) for col, row in specs]
+    heights = [c.height for c in contents if c is not None]
+    norm_height = max(heights) if heights else 1
+    print(f"Uniform frame content height: {norm_height}px")
+
+    frame_d_idle, frame_d_walk1, frame_d_walk2 = [
+        compose_output_frame(c, norm_height) if c else Image.new('RGBA', (OUT_FRAME_W, OUT_FRAME_H), (0, 0, 0, 0))
+        for c in contents[0:3]
+    ]
+    frame_u_idle, frame_u_walk1, frame_u_walk2 = [
+        compose_output_frame(c, norm_height) if c else Image.new('RGBA', (OUT_FRAME_W, OUT_FRAME_H), (0, 0, 0, 0))
+        for c in contents[3:6]
+    ]
+    frame_s_idle, frame_s_walk1, frame_s_walk2 = [
+        compose_output_frame(c, norm_height) if c else Image.new('RGBA', (OUT_FRAME_W, OUT_FRAME_H), (0, 0, 0, 0))
+        for c in contents[6:9]
+    ]
     
     if side_facing == 'right':
         # Mirror to get left-facing
