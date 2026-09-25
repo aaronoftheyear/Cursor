@@ -16,10 +16,20 @@ export class ActivityFeed {
   private readonly providers: AgentActivityProvider[] = []
   private readonly recentIds = new Set<string>()
   private running = false
+  private sessionLog: ClaudeSessionLogProvider | null = null
 
   constructor(private readonly options: ActivityFeedOptions) {
-    this.providers.push(new ClaudeSessionLogProvider(options.projectRoot))
+    this.sessionLog = new ClaudeSessionLogProvider(options.projectRoot)
+    this.providers.push(this.sessionLog)
     if (options.extraProviders) this.providers.push(...options.extraProviders)
+  }
+
+  isRunning(): boolean {
+    return this.running
+  }
+
+  isSessionLogPolling(): boolean {
+    return this.sessionLog?.isPolling() ?? false
   }
 
   private handleEvent(event: AgentEvent): void {

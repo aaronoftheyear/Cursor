@@ -38,13 +38,20 @@ function runOne(
   event: AgentEvent,
   onDone: () => void
 ): void {
-  if (!event.cursorEvent || !event.hookPayload) {
+  let finished = false
+  const done = () => {
+    if (finished) return
+    finished = true
     onDone()
+  }
+
+  if (!event.cursorEvent || !event.hookPayload) {
+    done()
     return
   }
   const script = statusPythonPath(projectRoot)
   if (!fs.existsSync(script)) {
-    onDone()
+    done()
     return
   }
 
@@ -63,16 +70,16 @@ function runOne(
       console.warn('[ActivityFeed] python3 spawn failed:', err.message)
       loggedSpawnError = true
     }
-    onDone()
+    done()
   })
 
-  child.on('close', () => onDone())
+  child.on('close', () => done())
 
   try {
     child.stdin.write(JSON.stringify(event.hookPayload))
     child.stdin.end()
   } catch {
-    onDone()
+    done()
   }
 }
 

@@ -262,7 +262,6 @@ for event_groups in hooks.values():
 if not references:
     sys.exit(1)
 if found < required:
-    print(f"installed_version={found}", file=sys.stderr)
     sys.exit(2)
 sys.exit(0)
 PYTHON_VERSION

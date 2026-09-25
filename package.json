@@ -8,7 +8,7 @@
     "dev": "vite",
     "build": "tsc && vite build",
     "preview": "vite preview",
-    "test": "node tests/cloudAgentPoller.test.cjs && node tests/hookLifecycle.test.cjs && node tests/claudeCodeHook.test.cjs && node tests/agentActivityJsonl.test.cjs && node tests/agentActivityDedupe.test.cjs && node tests/agentActivityProviders.test.cjs && node tests/agentActivitySessionLog.test.cjs && node tests/agentActivityApplyPython.test.cjs && node tests/agentActivityMutations.test.cjs && node tests/hookNonBlocking.test.cjs",
+    "test": "node tests/cloudAgentPoller.test.cjs && node tests/hookLifecycle.test.cjs && node tests/claudeCodeHook.test.cjs && node tests/agentActivityJsonl.test.cjs && node tests/agentActivityDedupe.test.cjs && node tests/agentActivityProviders.test.cjs && node tests/agentActivitySessionLog.test.cjs && node tests/agentActivityApplyPython.test.cjs && node tests/agentActivityMutations.test.cjs && node tests/agentActivityViteFeed.test.cjs && node tests/hookNonBlocking.test.cjs",
     "doctor": "bash scripts/agent-dashboard-doctor.sh",
     "electron": "npm run build && electron .",
     "electron:dev": "concurrently \"vite\" \"wait-on http://localhost:5173 && electron .\""

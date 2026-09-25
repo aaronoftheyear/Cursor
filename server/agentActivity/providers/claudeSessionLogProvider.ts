@@ -52,6 +52,15 @@ export class ClaudeSessionLogProvider implements AgentActivityProvider {
     this.permissionTimerMs = options.permissionTimerMs ?? PERMISSION_TIMER_MS
   }
 
+  isPolling(): boolean {
+    return this.timer !== null
+  }
+
+  /** Test helper: one poll cycle without waiting for the interval. */
+  pollNow(): void {
+    this.poll()
+  }
+
   private loadOffsets(): void {
     try {
       if (!fs.existsSync(this.offsetsFile)) return
@@ -114,8 +123,7 @@ export class ClaudeSessionLogProvider implements AgentActivityProvider {
     return out
   }
 
-  private initialOffset(filePath: string, stat: fs.Stats): number {
-    if (this.offsets.has(filePath)) return this.offsets.get(filePath)!.offset
+  private seedOffsetAtEof(filePath: string, stat: fs.Stats): number {
     this.offsets.set(filePath, { offset: stat.size, lastSize: stat.size })
     this.offsetsDirty = true
     return stat.size
@@ -171,17 +179,21 @@ export class ClaudeSessionLogProvider implements AgentActivityProvider {
     }
 
     const saved = this.offsets.get(filePath)
-    let offset = saved ? saved.offset : this.initialOffset(filePath, stat)
+    let offset = saved ? saved.offset : this.seedOffsetAtEof(filePath, stat)
 
-    if (
-      (saved && stat.size < saved.lastSize) ||
-      stat.size < offset ||
-      offset > stat.size
-    ) {
+    if (saved && stat.size < saved.lastSize) {
+      offset = 0
+      this.partialLines.delete(filePath)
+    } else if (stat.size < offset) {
       offset = 0
       this.partialLines.delete(filePath)
     }
-    if (offset > 0 && stat.size > 0) {
+
+    if (stat.size === offset) {
+      return
+    }
+
+    if (offset > 0 && offset < stat.size) {
       const probe = Buffer.alloc(1)
       const pfd = fs.openSync(filePath, 'r')
       fs.readSync(pfd, probe, 0, 1, offset)
@@ -191,6 +203,7 @@ export class ClaudeSessionLogProvider implements AgentActivityProvider {
         this.partialLines.delete(filePath)
       }
     }
+
     if (stat.size <= offset) return
 
     const fd = fs.openSync(filePath, 'r')
@@ -204,32 +217,45 @@ export class ClaudeSessionLogProvider implements AgentActivityProvider {
     this.partialLines.delete(filePath)
 
     const parts = chunk.split('\n')
+    let incomplete = ''
     if (!chunk.endsWith('\n')) {
-      this.partialLines.set(filePath, parts.pop() || '')
+      incomplete = parts.pop() || ''
     }
 
+    let endOfCompleteLines = startOffset
     let lineStart = startOffset
+
     for (const line of parts) {
+      if (!line.length && parts.length === 1) continue
       const lineBytes = Buffer.byteLength(line, 'utf-8') + 1
       const byteOffset = lineStart
-      lineStart += lineBytes
 
-      const { events, schedulePermissionTimer } = parseClaudeJsonlLine(
+      const result = parseClaudeJsonlLine(
         line,
         { sessionId, filePath, byteOffset },
         state
       )
 
-      if (schedulePermissionTimer) this.schedulePermissionTimer(sessionId)
-      else if (events.some((e) => e.kind === 'turnEnd' || e.kind === 'activity')) {
-        this.clearPermissionTimer(sessionId)
-      }
+      if (result.schedulePermissionTimer) this.schedulePermissionTimer(sessionId)
+      if (result.cancelPermissionTimer) this.clearPermissionTimer(sessionId)
+      if (result.refreshPermissionTimer) this.schedulePermissionTimer(sessionId)
 
-      for (const ev of events) this.emit!(ev)
+      for (const ev of result.events) this.emit!(ev)
+
+      lineStart += lineBytes
+      endOfCompleteLines = lineStart
     }
 
-    this.offsets.set(filePath, { offset: stat.size, lastSize: stat.size })
-    this.offsetsDirty = true
+    if (incomplete) {
+      this.partialLines.set(filePath, incomplete)
+    }
+
+    const newOffset = incomplete ? endOfCompleteLines : stat.size
+    const prev = this.offsets.get(filePath)
+    if (!prev || prev.offset !== newOffset || prev.lastSize !== stat.size) {
+      this.offsets.set(filePath, { offset: newOffset, lastSize: stat.size })
+      this.offsetsDirty = true
+    }
   }
 
   private poll(): void {

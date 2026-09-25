@@ -43,7 +43,7 @@ test('hook completes in under 500ms with slow python', () => {
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'hook-nb-'));
   const fakeBin = path.join(tempDir, 'bin');
   fs.mkdirSync(fakeBin, { recursive: true });
-  fs.writeFileSync(path.join(fakeBin, 'python3'), '#!/bin/sh\n(sleep 30 &)\n', { mode: 0o755 });
+  fs.writeFileSync(path.join(fakeBin, 'python3'), '#!/bin/sh\nexec sleep 30\n', { mode: 0o755 });
 
   const start = Date.now();
   const result = runHook(

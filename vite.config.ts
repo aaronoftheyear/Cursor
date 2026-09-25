@@ -37,6 +37,13 @@ let cloudAgentByIdCache: Map<string, CloudAgentStatus> = new Map()
 let cloudPollTime = 0
 const CLOUD_POLL_INTERVAL_MS = 30_000
 
+let dashboardActivityFeed: ActivityFeed | null = null
+
+/** @internal Tests: feed must stay running after Vite configureServer returns. */
+export function getDashboardActivityFeedForTests(): ActivityFeed | null {
+  return dashboardActivityFeed
+}
+
 // Track last sent response for updatedAt comparison
 const updatedAtState = createUpdatedAtState()
 
@@ -280,8 +287,6 @@ export default defineConfig(({ mode }) => {
 
   const liveStatusMiddleware = createLiveStatusMiddleware(cursorApiKey)
 
-  let activityFeed: ActivityFeed | null = null
-
   return {
     base: './',
     build: {
@@ -296,21 +301,21 @@ export default defineConfig(({ mode }) => {
         name: 'dashboard-live-status',
         configureServer(server) {
           server.middlewares.use('/live-status.json', liveStatusMiddleware)
-          activityFeed = new ActivityFeed({ projectRoot: process.cwd() })
-          activityFeed.start()
-          return () => {
-            activityFeed?.stop()
-            activityFeed = null
-          }
+          dashboardActivityFeed = new ActivityFeed({ projectRoot: process.cwd() })
+          dashboardActivityFeed.start()
+          server.httpServer?.once('close', () => {
+            dashboardActivityFeed?.stop()
+            dashboardActivityFeed = null
+          })
         },
         configurePreviewServer(server) {
           server.middlewares.use('/live-status.json', liveStatusMiddleware)
-          activityFeed = new ActivityFeed({ projectRoot: process.cwd() })
-          activityFeed.start()
-          return () => {
-            activityFeed?.stop()
-            activityFeed = null
-          }
+          dashboardActivityFeed = new ActivityFeed({ projectRoot: process.cwd() })
+          dashboardActivityFeed.start()
+          server.httpServer?.once('close', () => {
+            dashboardActivityFeed?.stop()
+            dashboardActivityFeed = null
+          })
         },
       },
     ],

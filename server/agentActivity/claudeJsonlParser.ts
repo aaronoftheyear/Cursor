@@ -16,6 +16,13 @@ export interface ClaudeJsonlSessionState {
   hadToolsInTurn: boolean
 }
 
+export interface JsonlParseResult {
+  events: AgentEvent[]
+  schedulePermissionTimer: boolean
+  cancelPermissionTimer: boolean
+  refreshPermissionTimer: boolean
+}
+
 const PERMISSION_EXEMPT_TOOLS = new Set([
   'Read',
   'Glob',
@@ -37,17 +44,17 @@ export function sessionIdFromJsonlPath(filePath: string): string {
   return base.replace(/\.jsonl$/i, '') || 'unknown'
 }
 
-function eventId(
+function blockEventId(
   ctx: JsonlParseContext,
   record: Record<string, unknown>,
-  suffix: string
+  blockKey: string
 ): string {
   const uuid = typeof record.uuid === 'string' ? record.uuid : ''
-  if (uuid) return `${ctx.sessionId}:${uuid}`
-  return `${ctx.filePath}@${ctx.byteOffset}:${suffix}`
+  if (uuid) return `${ctx.sessionId}:${uuid}:${blockKey}`
+  return `${ctx.filePath}@${ctx.byteOffset}:${blockKey}`
 }
 
-function baseEvent(ctx: JsonlParseContext, _record: Record<string, unknown>) {
+function baseEvent(ctx: JsonlParseContext) {
   return {
     ts: Date.now(),
     source: 'claude-session-log' as const,
@@ -64,11 +71,11 @@ function maybeSessionStart(
 ): AgentEvent[] {
   if (state.sessionStarted) return []
   state.sessionStarted = true
-  const base = baseEvent(ctx, record)
+  const base = baseEvent(ctx)
   return [
     {
       ...base,
-      id: eventId(ctx, record, `sessionStart:${record.uuid || 'start'}`),
+      id: blockEventId(ctx, record, 'sessionStart'),
       kind: 'sessionStart',
       status: 'working',
       activity: 'planning',
@@ -78,40 +85,69 @@ function maybeSessionStart(
   ]
 }
 
+function userHasTextPrompt(content: unknown): boolean {
+  if (typeof content === 'string') return content.trim().length > 0
+  if (!Array.isArray(content)) return false
+  return content.some(
+    (b) =>
+      b &&
+      typeof b === 'object' &&
+      (b as { type?: string }).type === 'text' &&
+      typeof (b as { text?: string }).text === 'string' &&
+      (b as { text: string }).text.trim().length > 0
+  )
+}
+
 export function parseClaudeJsonlLine(
   line: string,
   ctx: JsonlParseContext,
   state: ClaudeJsonlSessionState
-): { events: AgentEvent[]; schedulePermissionTimer: boolean } {
+): JsonlParseResult {
+  const empty: JsonlParseResult = {
+    events: [],
+    schedulePermissionTimer: false,
+    cancelPermissionTimer: false,
+    refreshPermissionTimer: false,
+  }
   const trimmed = line.trim()
-  if (!trimmed) return { events: [], schedulePermissionTimer: false }
+  if (!trimmed) return empty
 
   let record: Record<string, unknown>
   try {
     record = JSON.parse(trimmed) as Record<string, unknown>
   } catch {
-    return { events: [], schedulePermissionTimer: false }
+    return empty
   }
 
   const type = record.type
-  const base = baseEvent(ctx, record)
+  const base = baseEvent(ctx)
   const events: AgentEvent[] = []
   let schedulePermissionTimer = false
+  let cancelPermissionTimer = false
+  let refreshPermissionTimer = false
 
   if (type === 'system' && record.subtype === 'turn_duration') {
     state.hadToolsInTurn = false
     events.push({
       ...base,
-      id: eventId(ctx, record, 'turnEnd'),
+      id: blockEventId(ctx, record, 'turnEnd'),
       kind: 'turnEnd',
       status: 'idle',
       detail: 'Claude Code — turn complete',
     })
-    return { events, schedulePermissionTimer: false }
+    return { events, schedulePermissionTimer, cancelPermissionTimer, refreshPermissionTimer }
   }
 
   if (type === 'system') {
-    return { events, schedulePermissionTimer: false }
+    return empty
+  }
+
+  if (type === 'progress') {
+    const subtype = record.subtype
+    if (subtype === 'bash_progress' || record.tool_use_id) {
+      refreshPermissionTimer = true
+    }
+    return { events, schedulePermissionTimer, cancelPermissionTimer, refreshPermissionTimer }
   }
 
   const assistantContent =
@@ -125,11 +161,12 @@ export function parseClaudeJsonlLine(
       name?: string
       input?: Record<string, unknown>
     }>
-    for (const block of blocks) {
+
+    blocks.forEach((block, blockIndex) => {
       if (block.type === 'thinking') {
         events.push({
           ...base,
-          id: eventId(ctx, record, `think:${block.id || 'block'}`),
+          id: blockEventId(ctx, record, `thinking:${blockIndex}`),
           kind: 'activity',
           status: 'working',
           activity: 'thinking',
@@ -137,38 +174,36 @@ export function parseClaudeJsonlLine(
           detail: 'Claude Code — Thinking',
         })
       }
-    }
+    })
 
-    const hasToolUse = blocks.some((b) => b.type === 'tool_use')
-    if (hasToolUse) {
+    const toolBlocks = blocks.filter((b) => b.type === 'tool_use' && b.id && b.name)
+    if (toolBlocks.length > 0) {
       state.hadToolsInTurn = true
       let hasNonExempt = false
-      for (const block of blocks) {
-        if (block.type === 'tool_use' && block.id && block.name) {
-          const command =
-            typeof block.input?.command === 'string' ? block.input.command : undefined
-          const activity = activityFromToolName(block.name, command)
-          events.push({
-            ...base,
-            id: eventId(ctx, record, `tool:${block.id}`),
-            kind: 'activity',
-            status: 'working',
-            activity,
-            activityDepth:
-              activity === 'researching' || activity === 'github' ? 'deep' : 'brief',
-            detail: `Claude Code — ${activity}`,
-          })
-          if (!PERMISSION_EXEMPT_TOOLS.has(block.name)) hasNonExempt = true
-        }
-      }
+      toolBlocks.forEach((block, toolIndex) => {
+        const command =
+          typeof block.input?.command === 'string' ? block.input.command : undefined
+        const activity = activityFromToolName(block.name!, command)
+        events.push({
+          ...base,
+          id: blockEventId(ctx, record, `tool:${block.id ?? toolIndex}`),
+          kind: 'activity',
+          status: 'working',
+          activity,
+          activityDepth:
+            activity === 'researching' || activity === 'github' ? 'deep' : 'brief',
+          detail: `Claude Code — ${activity}`,
+        })
+        if (!PERMISSION_EXEMPT_TOOLS.has(block.name!)) hasNonExempt = true
+      })
       schedulePermissionTimer = hasNonExempt
-      return { events, schedulePermissionTimer }
+      return { events, schedulePermissionTimer, cancelPermissionTimer, refreshPermissionTimer }
     }
 
     if (blocks.some((b) => b.type === 'text') && !state.hadToolsInTurn) {
       events.push({
         ...base,
-        id: eventId(ctx, record, 'textIdle'),
+        id: blockEventId(ctx, record, 'text:0'),
         kind: 'activity',
         status: 'working',
         activity: 'thinking',
@@ -176,7 +211,7 @@ export function parseClaudeJsonlLine(
         detail: 'Claude Code — Thinking',
       })
     }
-    return { events, schedulePermissionTimer: false }
+    return { events, schedulePermissionTimer, cancelPermissionTimer, refreshPermissionTimer }
   }
 
   if (type === 'user') {
@@ -186,23 +221,20 @@ export function parseClaudeJsonlLine(
         (b) => b && typeof b === 'object' && (b as { type?: string }).type === 'tool_result'
       )
       if (hasToolResult) {
-        return { events: [], schedulePermissionTimer: false }
-      }
-      const hasToolUseResult = record.toolUseResult !== undefined
-      if (hasToolUseResult) {
-        return { events: [], schedulePermissionTimer: false }
+        cancelPermissionTimer = true
+        return { events, schedulePermissionTimer, cancelPermissionTimer, refreshPermissionTimer }
       }
     }
-    if (typeof content === 'string' && content.trim()) {
+    if (record.toolUseResult !== undefined) {
+      cancelPermissionTimer = true
+      return { events, schedulePermissionTimer, cancelPermissionTimer, refreshPermissionTimer }
+    }
+    if (userHasTextPrompt(content)) {
       events.push(...maybeSessionStart(state, ctx, record))
       state.hadToolsInTurn = false
     }
-    return { events, schedulePermissionTimer: false }
+    return { events, schedulePermissionTimer, cancelPermissionTimer, refreshPermissionTimer }
   }
 
-  if (type === 'progress') {
-    return { events, schedulePermissionTimer: false }
-  }
-
-  return { events, schedulePermissionTimer: false }
+  return empty
 }

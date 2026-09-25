@@ -7,6 +7,7 @@ const fs = require('fs');
 const path = require('path');
 
 const TTL_MS = 24 * 60 * 60 * 1000;
+const MAX_REGISTER_ATTEMPTS = 5;
 
 function hookSessionsPath(projectRoot) {
   return path.join(projectRoot, '.dashboard', 'hook-sessions.json');
@@ -43,10 +44,17 @@ function atomicWrite(file, text) {
 function registerHookSession(projectRoot, sessionId) {
   if (!sessionId) return;
   const file = hookSessionsPath(projectRoot);
-  const reg = loadRegistry(projectRoot);
-  reg.sessions[sessionId] = { lastHookAt: Date.now() };
-  pruneSessions(reg.sessions);
-  atomicWrite(file, JSON.stringify(reg, null, 2) + '\n');
+  for (let attempt = 0; attempt < MAX_REGISTER_ATTEMPTS; attempt++) {
+    try {
+      const reg = loadRegistry(projectRoot);
+      reg.sessions[sessionId] = { lastHookAt: Date.now() };
+      pruneSessions(reg.sessions);
+      atomicWrite(file, JSON.stringify(reg, null, 2) + '\n');
+      return;
+    } catch {
+      /* retry */
+    }
+  }
 }
 
 module.exports = {

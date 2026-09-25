@@ -33,6 +33,14 @@ function runProviderScenario(scriptBody) {
   return JSON.parse(line);
 }
 
+function rmTmp(tmp) {
+  try {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  } catch {
+    /* ignore */
+  }
+}
+
 test('startup does not replay old history', () => {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'clog-old-'));
   const logFile = path.join(tmp, 'old-session.jsonl');
@@ -56,6 +64,7 @@ test('startup does not replay old history', () => {
     console.log(JSON.stringify({ count: events.length }));
   `);
   if (out.count !== 0) throw new Error(`expected 0 events, got ${out.count}`);
+  rmTmp(tmp);
 });
 
 test('only newly appended lines emit events', () => {
@@ -86,6 +95,7 @@ test('only newly appended lines emit events', () => {
   `);
   if (out.count < 1) throw new Error('expected events on append');
   if (out.act !== 'reading') throw new Error(`expected reading got ${out.act}`);
+  rmTmp(tmp);
 });
 
 test('file truncation resets offset and partial line buffer', () => {
@@ -113,6 +123,7 @@ test('file truncation resets offset and partial line buffer', () => {
     console.log(JSON.stringify({ turnEnd: events.some(e => e.kind === 'turnEnd') }));
   `);
   if (!out.turnEnd) throw new Error('expected turnEnd after rotation');
+  rmTmp(tmp);
 });
 
 test('permission timer fires for non-exempt tool', () => {
