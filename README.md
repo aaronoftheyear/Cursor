@@ -138,6 +138,62 @@ electron/
 
 Edit `ROUTING_RULES` in `src/orchestrator.ts` to adjust keyword weights and agent assignments.
 
+## External Agent Status
+
+The dashboard can display live status for external agents (non-Cursor bots, desktop assistants, etc.) alongside Cursor-integrated agents.
+
+### Setting External Agent Status
+
+Use the CLI script to report status from any shell command:
+
+```bash
+# Basic usage
+./scripts/set-agent-status.sh <agent-id> <status> [detail]
+
+# Set Grok to working with a detail message
+./scripts/set-agent-status.sh grokbot working "Searching Twitter trends"
+
+# Set Grok to thinking
+./scripts/set-agent-status.sh grokbot thinking "Processing query..."
+
+# Set Grok back to idle
+./scripts/set-agent-status.sh grokbot idle
+```
+
+**Arguments:**
+- `agent-id` - The agent identifier (e.g. `grokbot`, `gemini`, `apple-intelligence`)
+- `status` - One of: `idle`, `working`, `thinking`, `busy`
+- `detail` - Optional short description shown in the sidebar
+
+**Supported agents:** Any agent defined in `src/agents.ts` can receive external status. Common ones:
+- `grokbot` - Grok / X assistant
+- `gemini` - Google Gemini
+- `apple-intelligence` - Apple Intelligence / Siri
+
+### How It Works
+
+1. The script writes to `.dashboard/external-agents.json`
+2. The Vite dev server merges this with Cursor hook status when serving `/live-status.json`
+3. External agent status takes precedence over default idle state
+4. **Staleness:** If no update is received for 2 minutes, the agent reverts to idle
+
+### Example: Desktop Assistant Integration
+
+If you have a Grok-based desktop assistant, add these calls to your bot:
+
+```bash
+# When starting a task
+./scripts/set-agent-status.sh grokbot working "Researching: $QUERY"
+
+# When thinking/processing
+./scripts/set-agent-status.sh grokbot thinking
+
+# When done
+./scripts/set-agent-status.sh grokbot idle
+```
+
+The status file is written to `.dashboard/external-agents.json` and is not tracked by git.
+
 ## License
 
 MIT
