@@ -4,7 +4,7 @@ import { startLiveStatusSync } from './statusSync';
 import { Agent } from './types';
 
 class AIAgentDashboard {
-  private engine: GameEngine;
+  readonly engine: GameEngine;
   private selectedAgent: Agent | null = null;
   
   constructor() {
@@ -31,6 +31,36 @@ class AIAgentDashboard {
     setInterval(() => this.updateLayaStatus(), 5000);
 
     startLiveStatusSync(this.engine, () => this.updateAgentList());
+
+    if (import.meta.hot) {
+      (window as unknown as { __aiDashboard?: AIAgentDashboard }).__aiDashboard = this;
+      this.applyDebugPinsFromQuery();
+    }
+  }
+
+  /** ?debugPin=jarvis@10,20&debugHide=1 hides all agents except pinned */
+  private applyDebugPinsFromQuery(): void {
+    const params = new URLSearchParams(window.location.search);
+    const pin = params.get('debugPin');
+    if (!pin) return;
+
+    const run = () => {
+      if (params.get('debugHide') === '1') {
+        const ids = pin.split(';').map((p) => p.split('@')[0]?.trim()).filter(Boolean) as string[];
+        this.engine.setDebugAgentVisibility(ids);
+      }
+      for (const part of pin.split(';')) {
+        const [agentId, coords] = part.split('@');
+        if (!agentId || !coords) continue;
+        const [tx, ty] = coords.split(',').map((n) => parseInt(n, 10));
+        if (Number.isFinite(tx) && Number.isFinite(ty)) {
+          this.engine.pinAgentAtFootTile(agentId.trim(), tx, ty);
+        }
+      }
+    };
+
+    window.setTimeout(run, 4000);
+    window.setTimeout(run, 8000);
   }
   
   private setupUI(): void {
