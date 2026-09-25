@@ -475,14 +475,16 @@ def tool_name(hook: dict) -> str:
 
 
 def is_github_shell_command(cmd: str) -> bool:
-    """Check if shell command is a GitHub/git operation."""
+    """Check if shell command contains a GitHub/git operation anywhere in the chain."""
     if not cmd or not isinstance(cmd, str):
         return False
-    cmd = cmd.strip().lower()
-    if cmd.startswith("gh "):
+    cmd_lower = cmd.lower()
+    # Check for gh CLI anywhere in command (handles `cd x && gh ...`, pipes, etc.)
+    if "gh " in cmd_lower or cmd_lower.endswith("gh"):
         return True
-    git_remote_ops = ("git push", "git pull", "git fetch", "git clone")
-    return any(cmd.startswith(op) for op in git_remote_ops)
+    # Check for git operations anywhere in command
+    git_ops = ("git push", "git pull", "git fetch", "git clone", "git commit", "git status")
+    return any(op in cmd_lower for op in git_ops)
 
 
 def activity_from_hook(event: str, hook: dict) -> tuple[str, str]:
@@ -521,21 +523,32 @@ def activity_from_hook(event: str, hook: dict) -> tuple[str, str]:
             "grep",
             "glob",
             "list_dir",
+            "ls",
             "semanticsearch",
         ):
             return "reading", ACTIVITY_LABELS["reading"]
+        if tool in (
+            "task",
+            "switchmode",
+            "todo_write",
+            "todowrite",
+            "creategoal",
+            "updategoal",
+            "exitplanmode",
+        ):
+            return "planning", ACTIVITY_LABELS["planning"]
         if tool in (
             "write",
             "strreplace",
             "search_replace",
             "edit",
+            "multiedit",
             "applypatch",
             "delete",
             "editnotebook",
+            "notebookedit",
         ):
             return "editing", ACTIVITY_LABELS["editing"]
-        if tool in ("task", "switchmode", "todo_write", "creategoal", "updategoal"):
-            return "planning", ACTIVITY_LABELS["planning"]
         if "github" in tool or tool.startswith("github_"):
             return "github", ACTIVITY_LABELS["github"]
         if "mcp" in tool or tool.startswith("call"):

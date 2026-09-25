@@ -201,6 +201,8 @@ When `--waiting-on` is specified:
 - The status defaults to `working` even if `idle` is specified
 - Status auto-clears when the referenced cloud agent finishes
 
+**Note:** Auto-clearing requires `CURSOR_API_KEY` to be set (see [Cloud Agent Status](#cloud-agent-status-friday--bumblebee)). Without it, waiting status only clears when the TTL expires.
+
 ### Activities (same as Cursor hooks)
 
 These map to action spots in the game world:
@@ -306,7 +308,6 @@ The dashboard integrates with [Claude Code](https://claude.ai/code) (Anthropic's
 | WebSearch, WebFetch | researching |
 | TodoWrite, plan | planning |
 | Stop, SessionEnd | idle |
-| Notification | waiting |
 
 ### How It Works
 

@@ -270,6 +270,7 @@ export function actionKindFromLiveActivity(
       thinking: 'planning',
       researching: 'research',
       github: 'computer',
+      waiting: 'computer',
     };
     return deepMap[activity];
   }
@@ -286,6 +287,7 @@ export function actionKindFromLiveActivity(
       thinking: 'research',
       researching: 'research_tv',
       github: 'github',
+      waiting: 'computer',
     };
     return deepMap[activity];
   }
@@ -302,6 +304,7 @@ export function actionKindFromLiveActivity(
       thinking: 'main_workstation',
       researching: 'research',
       github: 'lookup_cursor',
+      waiting: 'main_workstation',
     };
     return deepMap[activity];
   }

@@ -270,8 +270,11 @@ while [[ $# -gt 0 ]]; do
       ;;
     -t|--ttl)
       [[ $# -lt 2 ]] && die "--ttl requires an argument"
-      TTL_SECONDS=$(parse_duration "$2")
-      if [[ "$TTL_SECONDS" == "0" && "$2" != "0" ]]; then
+      TTL_SECONDS=$(parse_duration "$2") || true
+      if [[ -z "$TTL_SECONDS" || "$TTL_SECONDS" == "0" ]]; then
+        die "Invalid TTL: $2 (must be > 0; use seconds, 5m, 1h, or 2h30m)"
+      fi
+      if ! [[ "$TTL_SECONDS" =~ ^[0-9]+$ ]]; then
         die "Invalid TTL format: $2 (use seconds, 5m, 1h, or 2h30m)"
       fi
       if [[ "$TTL_SECONDS" -gt "$MAX_TTL_SECONDS" ]]; then

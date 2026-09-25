@@ -5,7 +5,7 @@ import { defineConfig, loadEnv } from 'vite'
 
 const EXTERNAL_STALE_MS = 120_000 // 2 minutes
 const CURSOR_STALE_MS = 300_000 // 5 minutes - self-healing for stuck agents
-const DEFAULT_AGENTS = ['jarvis', 'friday', 'bumblebee'] as const
+const DEFAULT_AGENTS = ['jarvis', 'friday', 'bumblebee', 'claude-code'] as const
 
 interface AgentStatus {
   status: string
@@ -57,11 +57,14 @@ interface CloudAgentStatus {
   activityDepth?: 'brief' | 'deep'
   source: 'cloud-api'
   cloudAgentId?: string
+  cloudAgentName?: string
   cloudRunStatus?: string
 }
 
 // Cloud agent poller state
 let cloudAgentCache: Map<string, CloudAgentStatus> = new Map()
+// Separate cache for all cloud agents by bc-id (for waiting-on checks)
+let cloudAgentByIdCache: Map<string, CloudAgentStatus> = new Map()
 let cloudPollTime = 0
 const CLOUD_POLL_INTERVAL_MS = 30_000
 
@@ -146,20 +149,33 @@ function mergeExternalAgents(
     let waitingOnFinished = false
     if (extStatus.waitingOn && !isStale) {
       const waitingOnId = extStatus.waitingOn
-      // Check if it's a bc-ID reference in the cloud status
-      for (const [, cloudAgent] of cloudStatus) {
-        if (cloudAgent.cloudAgentId === waitingOnId || 
-            (cloudAgent.cloudAgentId && waitingOnId.toLowerCase().includes(cloudAgent.cloudAgentId.toLowerCase()))) {
-          if (cloudAgent.status === 'idle') {
-            waitingOnFinished = true
-          }
-          break
+      const waitingOnLower = waitingOnId.toLowerCase()
+      
+      // First check if it's a direct bc-ID reference
+      if (waitingOnId.startsWith('bc-')) {
+        const cloudAgent = cloudAgentByIdCache.get(waitingOnId)
+        if (cloudAgent && cloudAgent.status === 'idle') {
+          waitingOnFinished = true
         }
       }
-      // Also check by name match in cloud agents
+      
+      // Check by exact cloud agent ID match in the cache
       if (!waitingOnFinished) {
-        for (const [, cloudAgent] of cloudStatus) {
-          if (cloudAgent.detail?.toLowerCase().includes(waitingOnId.toLowerCase())) {
+        for (const [, cloudAgent] of cloudAgentByIdCache) {
+          if (cloudAgent.cloudAgentId === waitingOnId) {
+            if (cloudAgent.status === 'idle') {
+              waitingOnFinished = true
+            }
+            break
+          }
+        }
+      }
+      
+      // Check by name match in cloud agents (using cloudAgentName, not detail)
+      if (!waitingOnFinished) {
+        for (const [, cloudAgent] of cloudAgentByIdCache) {
+          if (cloudAgent.cloudAgentName?.toLowerCase().includes(waitingOnLower) ||
+              waitingOnLower.includes(cloudAgent.cloudAgentName?.toLowerCase() || '')) {
             if (cloudAgent.status === 'idle') {
               waitingOnFinished = true
             }
@@ -220,9 +236,11 @@ async function pollCloudAgentsApi(config: AgentLinksConfig, apiKey: string | und
 
     const data = await res.json() as { items: Array<{ id: string; name?: string; latestRunId?: string }> }
     const newCache = new Map<string, CloudAgentStatus>()
+    const newIdCache = new Map<string, CloudAgentStatus>()
 
     for (const agent of data.items || []) {
-      const agentName = (agent.name || '').toLowerCase()
+      const agentName = agent.name || ''
+      const agentNameLower = agentName.toLowerCase()
       let avatarId: string | null = null
 
       for (const [id, spec] of Object.entries(config.agents)) {
@@ -230,15 +248,13 @@ async function pollCloudAgentsApi(config: AgentLinksConfig, apiKey: string | und
         const cloudSpec = spec.cloud || spec.cursor
         if (!cloudSpec?.agentNameContains) continue
         for (const hint of cloudSpec.agentNameContains) {
-          if (agentName.includes(hint.toLowerCase())) {
+          if (agentNameLower.includes(hint.toLowerCase())) {
             avatarId = id
             break
           }
         }
         if (avatarId) break
       }
-
-      if (!avatarId) continue
 
       let runStatus: 'idle' | 'working' = 'idle'
       let detail = 'Cloud agent idle'
@@ -276,19 +292,27 @@ async function pollCloudAgentsApi(config: AgentLinksConfig, apiKey: string | und
         detail,
         source: 'cloud-api',
         cloudAgentId: agent.id,
+        cloudAgentName: agentName,
       }
       if (runStatus === 'working') {
         status.activity = 'thinking'
         status.activityDepth = 'deep'
       }
 
-      const existing = newCache.get(avatarId)
-      if (!existing || (status.status === 'working' && existing.status !== 'working')) {
-        newCache.set(avatarId, status)
+      // Store in id cache for all agents (for waiting-on checks)
+      newIdCache.set(agent.id, status)
+
+      // Only store in avatar cache if it matches an avatar
+      if (avatarId) {
+        const existing = newCache.get(avatarId)
+        if (!existing || (status.status === 'working' && existing.status !== 'working')) {
+          newCache.set(avatarId, status)
+        }
       }
     }
 
     cloudAgentCache = newCache
+    cloudAgentByIdCache = newIdCache
     cloudPollTime = now
   } catch (err) {
     console.warn('[CloudAgentPoller] Poll failed:', err)
@@ -342,6 +366,10 @@ function createLiveStatusMiddleware(cursorApiKey: string | undefined) {
 
     // Finally merge cloud agent status
     merged = mergeCloudAgents(merged, cloudStatus)
+
+    // Always set a fresh updatedAt so the frontend knows the response is new
+    // (even if agent data hasn't changed, expiry/waiting state may have)
+    merged.updatedAt = new Date().toISOString()
 
     res.statusCode = 200
     res.setHeader('Content-Type', 'application/json')

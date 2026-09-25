@@ -69,14 +69,8 @@
       "label": "Claude Code (Anthropic CLI)",
       "claude": {
         "workspaceContains": [],
-        "payloadContains": [
-          "claude-code",
-          "claude code"
-        ],
-        "agentNameContains": [
-          "claude-code",
-          "claude code"
-        ]
+        "payloadContains": [],
+        "agentNameContains": []
       }
     }
   }

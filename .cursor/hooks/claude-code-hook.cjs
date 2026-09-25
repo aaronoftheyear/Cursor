@@ -13,7 +13,12 @@
  *   Stop → stop
  *   SessionEnd → sessionEnd
  *
- * Tool names are mapped to activities the same way as Cursor hooks.
+ * Events that are intentionally ignored:
+ *   SubagentStop - Would cause avatar to go idle mid-turn
+ *   Notification - Not mapped to any activity
+ *   PreCompact - Internal event
+ *
+ * Tool names are mapped to activities by update-dashboard-status.py.
  */
 
 const { spawnSync } = require('child_process');
@@ -28,10 +33,13 @@ const CLAUDE_TO_CURSOR_EVENT = {
   PostToolUse: 'postToolUse',
   Stop: 'stop',
   SessionEnd: 'sessionEnd',
-  SubagentStop: 'stop',
-  Notification: 'notification',
-  PreCompact: 'beforeSubmitPrompt',
 };
+
+const IGNORED_EVENTS = new Set([
+  'SubagentStop',
+  'Notification',
+  'PreCompact',
+]);
 
 function translateClaudePayload(claudePayload) {
   const cursorPayload = {
@@ -88,6 +96,10 @@ async function main() {
 
     const hookEventName = claudePayload.hook_event_name;
     if (!hookEventName) {
+      process.exit(0);
+    }
+
+    if (IGNORED_EVENTS.has(hookEventName)) {
       process.exit(0);
     }
 
