@@ -46,6 +46,37 @@ const SWAPPED_SPRITES = [
 const GROK_IDLE_SPRITE = 'grok.png';
 const METABEE_SPRITE = 'metabee.png';
 
+/** Round-10 re-conversion changes pixels but keeps frame order; compare via pipeline, not main. */
+const RECONVERTED_PIPELINE = {
+  'jarvis.png': {
+    sheet: 'public/assets/sprites/sheets/cursor-jarvis-v2.png',
+    idleCol: 1,
+    kind: 'rpg',
+  },
+  'gemini.png': { sheet: 'public/assets/sprites/sheets/gemini.png', idleCol: 1, kind: 'rpg' },
+  'claude.png': { sheet: 'public/assets/sprites/sheets/claude-grunt01.png', idleCol: 1, kind: 'rpg' },
+  'claude_cowork.png': {
+    sheet: 'public/assets/sprites/sheets/claude-cowork.png',
+    idleCol: 1,
+    kind: 'rpg',
+  },
+  'cursor_grunt02.png': {
+    sheet: 'public/assets/sprites/sheets/cursor-grunt02.png',
+    idleCol: 1,
+    kind: 'rpg',
+  },
+  'cursor_grunt01.png': {
+    sheet: 'public/assets/sprites/sheets/cursor-grunt01.png',
+    idleCol: 1,
+    kind: 'rpg',
+  },
+  'claude_code.png': {
+    sheet: 'public/assets/sprites/sheets/cluade-code.png',
+    idleCol: 1,
+    kind: 'rpg',
+  },
+};
+
 const DIRECTION_ORIGINS = { down: 0, up: 3, left: 6 };
 
 let STRIP_COL_IDLE, STRIP_COL_WALK1;
@@ -128,6 +159,24 @@ function buildGrokExpectedStrip() {
   return fs.readFileSync(tmpFinal);
 }
 
+function buildRpgPipelineExpectedStrip(spriteName) {
+  const spec = RECONVERTED_PIPELINE[spriteName];
+  const root = path.resolve(__dirname, '..');
+  const sheetPath = path.join(root, spec.sheet);
+  const tmpStrip = path.join(__dirname, `../.tmp-screenshots/${spriteName}-expected-strip.png`);
+  const tmpFinal = path.join(__dirname, `../.tmp-screenshots/${spriteName}-expected-final.png`);
+  fs.mkdirSync(path.dirname(tmpStrip), { recursive: true });
+  execSync(
+    `python3 scripts/convert-rpg-sheet.py "${sheetPath}" "${tmpStrip}" --idle-col ${spec.idleCol}`,
+    { cwd: root, stdio: 'pipe' }
+  );
+  execSync(`python3 scripts/reorder-strip-frames.py "${tmpStrip}" "${tmpFinal}"`, {
+    cwd: root,
+    stdio: 'pipe',
+  });
+  return fs.readFileSync(tmpFinal);
+}
+
 test('main-branch sprite fixtures are present', () => {
   const required = ['jarvis.png', 'friday.png', 'grok.png', METABEE_SPRITE];
   for (const sprite of required) {
@@ -138,7 +187,9 @@ test('main-branch sprite fixtures are present', () => {
 
 console.log('--- Swapped sprites: idle = main position 1 ---\n');
 
-for (const sprite of SWAPPED_SPRITES) {
+const SWAPPED_COMPARE_MAIN = SWAPPED_SPRITES.filter((s) => !(s in RECONVERTED_PIPELINE));
+
+for (const sprite of SWAPPED_COMPARE_MAIN) {
   for (const [dir, origin] of Object.entries(DIRECTION_ORIGINS)) {
     test(`${sprite} ${dir}: PR pos ${STRIP_COL_IDLE} = main pos ${STRIP_COL_WALK1}`, () => {
       const currentBuffer = getCurrentSpriteBuffer(sprite);
@@ -154,6 +205,25 @@ for (const sprite of SWAPPED_SPRITES) {
       assert.ok(
         prFrame.equals(mainFrame),
         `${sprite} ${dir}: PR frame ${prIdlePos} should equal main frame ${mainWalk1Pos}`
+      );
+    });
+  }
+}
+
+console.log('\n--- Re-converted RPG sheets: idle matches uniform-scale pipeline ---\n');
+
+for (const sprite of Object.keys(RECONVERTED_PIPELINE)) {
+  const expectedBuffer = buildRpgPipelineExpectedStrip(sprite);
+  for (const [dir, origin] of Object.entries(DIRECTION_ORIGINS)) {
+    test(`${sprite} ${dir}: PR idle matches re-convert pipeline`, () => {
+      const currentBuffer = getCurrentSpriteBuffer(sprite);
+      assert.ok(currentBuffer, `Missing ${sprite}`);
+      const prIdlePos = origin + STRIP_COL_IDLE;
+      const prFrame = extractFramePixels(currentBuffer, prIdlePos);
+      const expectedFrame = extractFramePixels(expectedBuffer, prIdlePos);
+      assert.ok(
+        prFrame.equals(expectedFrame),
+        `${sprite} ${dir}: idle must match convert-rpg-sheet + reorder pipeline`
       );
     });
   }

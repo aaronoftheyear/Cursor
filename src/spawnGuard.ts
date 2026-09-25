@@ -121,9 +121,9 @@ export function filterOutBottomRow(
 export function pickEngineSpawnFootTile(
   map: CollisionMap,
   room: Room | null,
-  walkableFallback: TileCoord[]
+  walkableFallback: TileCoord[],
+  bottomRow: number
 ): TileCoord | null {
-  const bottomRow = map.height - 1;
   const fromResolver = resolveNoSpawnTile(map, room, bottomRow);
   if (fromResolver) return fromResolver;
   const filtered = filterOutBottomRow(walkableFallback, bottomRow);

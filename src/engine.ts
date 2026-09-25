@@ -38,7 +38,30 @@ import {
   filterOutBottomRow,
   pickEngineSpawnFootTile,
   CollisionMap,
+  type Room,
 } from './spawnGuard';
+
+/** Bottom foot-tile row excluded from spawn (engine.ts single source of truth). */
+export function engineSpawnBottomRow(mapHeight: number): number {
+  return mapHeight - 1;
+}
+
+/**
+ * Engine spawn path without preferred tile — used by resolveSpawnFootTile and tests.
+ */
+export function engineResolveSpawnFootTile(
+  collisionMap: CollisionMap,
+  room: Room | null,
+  walkableFallback: TileCoord[]
+): TileCoord | null {
+  const bottomRow = engineSpawnBottomRow(collisionMap.height);
+  const tile = pickEngineSpawnFootTile(collisionMap, room, walkableFallback, bottomRow);
+  if (tile) return tile;
+  const candidates = filterOutBottomRow(walkableFallback, bottomRow);
+  if (candidates.length === 0) return null;
+  const idx = Math.floor(Math.random() * candidates.length);
+  return candidates[idx];
+}
 
 const MOVE_SPEED = 1.15;
 const WORK_MOVE_SPEED = 1.25;
@@ -246,8 +269,7 @@ export class GameEngine {
     if (!collisionMap) return null;
 
     const room = gameMap.getRoomForAgent(agentId) ?? null;
-    const bottomRow = collisionMap.height - 1;
-    const tile = pickEngineSpawnFootTile(
+    const tile = engineResolveSpawnFootTile(
       collisionMap,
       room,
       this.getAllWalkableTiles(agent)
@@ -255,15 +277,6 @@ export class GameEngine {
 
     if (tile && this.canOccupyTile(tile.x, tile.y, agent)) {
       return tile;
-    }
-
-    const candidates = filterOutBottomRow(this.getAllWalkableTiles(agent), bottomRow);
-    if (candidates.length > 0) {
-      const idx = Math.floor(Math.random() * candidates.length);
-      const fallback = candidates[idx];
-      if (this.canOccupyTile(fallback.x, fallback.y, agent)) {
-        return fallback;
-      }
     }
     return null;
   }
@@ -275,7 +288,7 @@ export class GameEngine {
       candidates = this.getAllWalkableTiles(agent);
     }
     // Filter out bottom row (reserved for map edge)
-    const bottomRow = this.mapGrid ? this.mapGrid.height - 1 : -1;
+    const bottomRow = this.mapGrid ? engineSpawnBottomRow(this.mapGrid.height) : -1;
     candidates = filterOutBottomRow(candidates, bottomRow);
     if (candidates.length === 0) return null;
     let best = candidates[0];

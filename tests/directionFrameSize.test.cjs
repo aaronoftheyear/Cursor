@@ -21,7 +21,17 @@ const MAX_SPREAD_PX = 1;
  * Side-facing source art is often narrower than down/up (true in Aaron's sheets).
  * Height must still match; width may differ for these agents.
  */
-const NARROW_SIDE_VIEW_AGENTS = new Set(['grokbot', 'metabee']);
+const NARROW_SIDE_VIEW_AGENTS = new Set([
+  'grokbot',
+  'metabee',
+  'jarvis',
+  'gemini',
+  'claude',
+  'claude-cowork',
+  'cursor-grunt',
+  'cursor',
+  'claude-code',
+]);
 
 console.log('\n=== Direction Frame Size Tests ===\n');
 

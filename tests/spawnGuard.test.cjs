@@ -215,7 +215,8 @@ test('Walkable bottom map: pickEngineSpawnFootTile never returns bottom row', ()
       'pickEngineSpawnFootTile',
       walkableBottomMap,
       room,
-      allWalkable
+      allWalkable,
+      walkableBottomRow
     );
     assert.ok(tile, 'Should return a tile');
     assert.notStrictEqual(tile.y, walkableBottomRow, 'Engine spawn path must exclude bottom row');
@@ -239,7 +240,8 @@ test('Walkable bottom map: only bottom row walkable still must not spawn there',
       'pickEngineSpawnFootTile',
       onlyBottomWalkable,
       null,
-      fallback
+      fallback,
+      br
     );
     assert.strictEqual(tile, null, 'When only bottom row is walkable, spawn must fail');
   }
