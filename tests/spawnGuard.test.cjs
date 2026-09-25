@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /**
  * Tests for the spawn guard - agents without spawn points should be placed on walkable tiles.
- * Tests the real MapGrid class with the real collision data.
+ * Uses the real spawnGuard module with real and synthetic collision maps.
  *
  * Run with: node tests/spawnGuard.test.cjs
  */
@@ -28,179 +28,195 @@ function test(name, fn) {
   }
 }
 
-const collisionPath = path.resolve(__dirname, '../public/assets/maps/dashboard-v1-collision.json');
-const collision = JSON.parse(fs.readFileSync(collisionPath, 'utf-8'));
+// Import real spawnGuard module using tsx
+const tsxPath = path.resolve(__dirname, '../node_modules/.bin/tsx');
+const modulePath = path.resolve(__dirname, '../src/spawnGuard.ts');
 
-console.log('--- Real MapGrid Collision Tests ---\n');
+function callSpawnGuard(fnName, ...args) {
+  const argsJson = args.map(a => JSON.stringify(a)).join(', ');
+  const code = `
+    const m = require('${modulePath.replace(/\\/g, '\\\\')}');
+    console.log(JSON.stringify(m.${fnName}(${argsJson})));
+  `;
+  try {
+    const result = execSync(`"${tsxPath}" -e "${code.replace(/"/g, '\\"').replace(/\n/g, ' ')}"`, {
+      encoding: 'utf-8',
+      cwd: path.resolve(__dirname, '..'),
+    });
+    return JSON.parse(result.trim());
+  } catch (e) {
+    throw new Error(`Failed to call ${fnName}: ${e.message}`);
+  }
+}
 
-// Import and test the real MapGrid class using tsx
-let MapGrid;
+// Verify module loads
 try {
-  const tsxPath = path.resolve(__dirname, '../node_modules/.bin/tsx');
-  const modulePath = path.resolve(__dirname, '../src/mapGrid.ts');
-  
-  // Test isBlocked function using real MapGrid
-  const testIsBlocked = (tileX, tileY) => {
-    const code = `
-      const { MapGrid } = require('${modulePath.replace(/\\/g, '\\\\')}');
-      const collision = ${JSON.stringify(collision)};
-      const grid = new MapGrid(collision);
-      console.log(grid.isBlocked(${tileX}, ${tileY}));
-    `;
-    const result = execSync(`"${tsxPath}" -e "${code.replace(/"/g, '\\"').replace(/\n/g, ' ')}"`, {
-      encoding: 'utf-8',
-      cwd: path.resolve(__dirname, '..'),
-    });
-    return result.trim() === 'true';
-  };
-  
-  // Test isBlockedForFootprint function using real MapGrid
-  const testIsBlockedForFootprint = (tileXs, footTileY) => {
-    const code = `
-      const { MapGrid } = require('${modulePath.replace(/\\/g, '\\\\')}');
-      const collision = ${JSON.stringify(collision)};
-      const grid = new MapGrid(collision);
-      console.log(grid.isBlockedForFootprint(${JSON.stringify(tileXs)}, ${footTileY}));
-    `;
-    const result = execSync(`"${tsxPath}" -e "${code.replace(/"/g, '\\"').replace(/\n/g, ' ')}"`, {
-      encoding: 'utf-8',
-      cwd: path.resolve(__dirname, '..'),
-    });
-    return result.trim() === 'true';
-  };
-  
-  console.log('✓ Successfully imported real MapGrid module\n');
-  
-  test('MapGrid.isBlocked: bottom row (row 22) is fully blocked', () => {
-    for (let x = 0; x < Math.min(10, collision.width); x++) {
-      assert.ok(testIsBlocked(x, 22), `Tile (${x}, 22) should be blocked`);
-    }
+  const verifyCode = `
+    const m = require('${modulePath.replace(/\\/g, '\\\\')}');
+    console.log(JSON.stringify({
+      hasIsBlocked: typeof m.isBlocked === 'function',
+      hasResolveNoSpawnTile: typeof m.resolveNoSpawnTile === 'function',
+      hasIsValidSpawnPosition: typeof m.isValidSpawnPosition === 'function',
+    }));
+  `;
+  const verifyResult = execSync(`"${tsxPath}" -e "${verifyCode.replace(/"/g, '\\"').replace(/\n/g, ' ')}"`, {
+    encoding: 'utf-8',
+    cwd: path.resolve(__dirname, '..'),
   });
-  
-  test('MapGrid.isBlocked: left edge (column 0) is fully blocked', () => {
-    for (let y = 0; y < Math.min(10, collision.height); y++) {
-      assert.ok(testIsBlocked(0, y), `Tile (0, ${y}) should be blocked`);
-    }
-  });
-  
-  test('MapGrid.isBlocked: right edge (column 33) is fully blocked', () => {
-    for (let y = 0; y < Math.min(10, collision.height); y++) {
-      assert.ok(testIsBlocked(33, y), `Tile (33, ${y}) should be blocked`);
-    }
-  });
-  
-  test('MapGrid.isBlocked: out-of-bounds coordinates return true', () => {
-    assert.ok(testIsBlocked(-1, 5), 'Negative X should be blocked');
-    assert.ok(testIsBlocked(5, -1), 'Negative Y should be blocked');
-    assert.ok(testIsBlocked(100, 5), 'X beyond width should be blocked');
-    assert.ok(testIsBlocked(5, 100), 'Y beyond height should be blocked');
-  });
-  
-  test('MapGrid.isBlockedForFootprint: returns true if any tile in footprint is blocked', () => {
-    // Bottom row is blocked, so any footprint including row 22 should be blocked
-    assert.ok(testIsBlockedForFootprint([5, 6], 22), 'Footprint at blocked row should be blocked');
-    assert.ok(testIsBlockedForFootprint([0], 5), 'Footprint at blocked column should be blocked');
-  });
-  
-  test('MapGrid.isBlockedForFootprint: returns false if all tiles are walkable', () => {
-    // Find a walkable tile from the collision data
-    let walkableX = -1, walkableY = -1;
-    for (let y = 3; y < collision.height - 1; y++) {
-      for (let x = 1; x < collision.width - 1; x++) {
-        if (collision.blocked[y * collision.width + x] === 0) {
-          walkableX = x;
-          walkableY = y;
-          break;
-        }
-      }
-      if (walkableX >= 0) break;
-    }
-    if (walkableX >= 0) {
-      assert.ok(!testIsBlockedForFootprint([walkableX], walkableY), 
-        `Walkable tile (${walkableX}, ${walkableY}) should not be blocked`);
-    }
-  });
-  
+  const verification = JSON.parse(verifyResult.trim());
+  if (!verification.hasIsBlocked || !verification.hasResolveNoSpawnTile || !verification.hasIsValidSpawnPosition) {
+    throw new Error('Missing expected exports');
+  }
+  console.log('✓ Successfully imported real spawnGuard module\n');
 } catch (e) {
-  console.error('FATAL: Failed to import src/mapGrid.ts');
-  console.error('Make sure tsx is installed: npm install --save-dev tsx');
+  console.error('FATAL: Failed to import src/spawnGuard.ts');
   console.error('Error:', e.message);
   process.exit(1);
 }
 
-console.log('\n--- Spawn Guard Code Pattern Tests ---\n');
+console.log('--- Small Map Tests ---\n');
 
-const enginePath = path.resolve(__dirname, '../src/engine.ts');
-const engine = fs.readFileSync(enginePath, 'utf-8');
+// Create a small 5x4 test map:
+// Row 0: blocked (top wall)
+// Row 1: walkable interior
+// Row 2: walkable interior
+// Row 3: blocked (bottom row - should never spawn here)
+const smallMap = {
+  width: 5,
+  height: 4,
+  blocked: [
+    1, 1, 1, 1, 1,  // row 0: all blocked
+    1, 0, 0, 0, 1,  // row 1: edges blocked, interior walkable
+    1, 0, 0, 0, 1,  // row 2: edges blocked, interior walkable
+    1, 1, 1, 1, 1,  // row 3: all blocked (bottom row)
+  ],
+};
 
-test('resolveSpawnFootTile handles missing spawn point', () => {
-  assert.ok(
-    engine.includes('if (preferred)'),
-    'Should check if preferred spawn point exists'
-  );
-  assert.ok(
-    engine.includes('// No spawn point defined'),
-    'Should have comment for no-spawn case'
-  );
+const smallRoom = { x: 1, y: 0, width: 3, height: 4 };
+const bottomRow = 3;
+
+test('isBlocked: returns true for blocked tiles', () => {
+  assert.strictEqual(callSpawnGuard('isBlocked', smallMap, 0, 0), true, 'Corner should be blocked');
+  assert.strictEqual(callSpawnGuard('isBlocked', smallMap, 2, 3), true, 'Bottom row should be blocked');
 });
 
-test('No-spawn guard prefers walkable tiles in agent\'s room', () => {
-  assert.ok(
-    engine.includes('let walkable = this.getWalkableTilesInRoom(agent)'),
-    'Should try room tiles first for no-spawn case'
-  );
+test('isBlocked: returns false for walkable tiles', () => {
+  assert.strictEqual(callSpawnGuard('isBlocked', smallMap, 1, 1), false, 'Interior should be walkable');
+  assert.strictEqual(callSpawnGuard('isBlocked', smallMap, 2, 2), false, 'Interior should be walkable');
 });
 
-test('No-spawn guard falls back to all walkable tiles', () => {
-  assert.ok(
-    engine.includes('walkable = this.getAllWalkableTiles(agent)'),
-    'Should fall back to all walkable tiles'
-  );
+test('isBlocked: returns true for out-of-bounds', () => {
+  assert.strictEqual(callSpawnGuard('isBlocked', smallMap, -1, 0), true, 'Negative X should be blocked');
+  assert.strictEqual(callSpawnGuard('isBlocked', smallMap, 10, 1), true, 'Beyond width should be blocked');
 });
 
-test('Spawn guard returns null if no walkable tiles', () => {
-  const resolveSpawnMatch = engine.match(/resolveSpawnFootTile[\s\S]*?return null;\s*\}/);
-  assert.ok(resolveSpawnMatch, 'Should return null if no walkable tiles found');
+test('getWalkableTilesInRoom: returns only walkable tiles in room', () => {
+  const tiles = callSpawnGuard('getWalkableTilesInRoom', smallMap, smallRoom);
+  assert.ok(Array.isArray(tiles), 'Should return array');
+  assert.strictEqual(tiles.length, 6, 'Should have 6 walkable tiles (3 wide x 2 high, skipping top row of room)');
+  
+  // All tiles should be walkable
+  for (const tile of tiles) {
+    assert.ok(!callSpawnGuard('isBlocked', smallMap, tile.x, tile.y), 
+      `Tile (${tile.x}, ${tile.y}) should be walkable`);
+  }
 });
 
-console.log('\n--- Collision Data Verification ---\n');
-
-function isBlocked(x, y) {
-  if (x < 0 || y < 0 || x >= collision.width || y >= collision.height) return true;
-  return collision.blocked[y * collision.width + x] === 1;
-}
-
-test('Collision data has correct dimensions (34x23)', () => {
-  assert.strictEqual(collision.width, 34, 'Width should be 34');
-  assert.strictEqual(collision.height, 23, 'Height should be 23');
+test('getAllWalkableTiles: returns all walkable tiles', () => {
+  const tiles = callSpawnGuard('getAllWalkableTiles', smallMap);
+  assert.strictEqual(tiles.length, 6, 'Should have 6 walkable tiles in small map');
 });
 
-test('Collision data has blocked array of correct size', () => {
-  assert.strictEqual(collision.blocked.length, collision.width * collision.height, 
-    'Blocked array should have width*height entries');
+test('resolveNoSpawnTile: never returns blocked tile', () => {
+  // Run multiple times to test randomness
+  for (let i = 0; i < 20; i++) {
+    const tile = callSpawnGuard('resolveNoSpawnTile', smallMap, smallRoom, bottomRow);
+    assert.ok(tile, 'Should return a tile');
+    assert.ok(!callSpawnGuard('isBlocked', smallMap, tile.x, tile.y),
+      `Tile (${tile.x}, ${tile.y}) should not be blocked`);
+  }
 });
 
-test('Bottom row (row 22) is fully blocked - spawn guard must never place here', () => {
+test('resolveNoSpawnTile: never returns bottom row', () => {
+  // Run multiple times to test randomness
+  for (let i = 0; i < 20; i++) {
+    const tile = callSpawnGuard('resolveNoSpawnTile', smallMap, smallRoom, bottomRow);
+    assert.ok(tile, 'Should return a tile');
+    assert.notStrictEqual(tile.y, bottomRow, 
+      `Tile (${tile.x}, ${tile.y}) should not be on bottom row ${bottomRow}`);
+  }
+});
+
+test('resolveNoSpawnTile: prefers room tiles when available', () => {
+  // With a room that has walkable tiles, it should pick from room
+  const tile = callSpawnGuard('resolveNoSpawnTile', smallMap, smallRoom, bottomRow);
+  assert.ok(tile, 'Should return a tile');
+  
+  // Tile should be within room bounds (excluding top row of room which is blocked anyway)
+  const inRoom = tile.x >= smallRoom.x && tile.x < smallRoom.x + smallRoom.width &&
+                 tile.y > smallRoom.y && tile.y < smallRoom.y + smallRoom.height;
+  assert.ok(inRoom, `Tile (${tile.x}, ${tile.y}) should be in room`);
+});
+
+test('isValidSpawnPosition: rejects blocked tiles', () => {
+  const result = callSpawnGuard('isValidSpawnPosition', smallMap, { x: 0, y: 0 }, bottomRow);
+  assert.strictEqual(result.valid, false, 'Should reject blocked tile');
+  assert.ok(result.reason.includes('blocked'), 'Reason should mention blocked');
+});
+
+test('isValidSpawnPosition: rejects bottom row', () => {
+  // Even if we artificially say the tile is walkable, bottom row should fail
+  const unblockBottomMap = { ...smallMap, blocked: [...smallMap.blocked] };
+  unblockBottomMap.blocked[bottomRow * smallMap.width + 2] = 0; // Make (2,3) walkable
+  
+  const result = callSpawnGuard('isValidSpawnPosition', unblockBottomMap, { x: 2, y: 3 }, bottomRow);
+  assert.strictEqual(result.valid, false, 'Should reject bottom row tile');
+  assert.ok(result.reason.includes('bottom row'), 'Reason should mention bottom row');
+});
+
+test('isValidSpawnPosition: accepts valid tiles', () => {
+  const result = callSpawnGuard('isValidSpawnPosition', smallMap, { x: 2, y: 1 }, bottomRow);
+  assert.strictEqual(result.valid, true, 'Should accept valid tile');
+});
+
+console.log('\n--- Real Collision Map Tests ---\n');
+
+const collisionPath = path.resolve(__dirname, '../public/assets/maps/dashboard-v1-collision.json');
+const collision = JSON.parse(fs.readFileSync(collisionPath, 'utf-8'));
+const realBottomRow = collision.height - 1;
+
+test('Real map: bottom row is fully blocked', () => {
   for (let x = 0; x < collision.width; x++) {
-    assert.ok(isBlocked(x, 22), `Tile (${x}, 22) should be blocked`);
+    assert.ok(callSpawnGuard('isBlocked', collision, x, realBottomRow),
+      `Tile (${x}, ${realBottomRow}) should be blocked`);
   }
 });
 
-test('Edge columns (0 and 33) are fully blocked - spawn guard must never place here', () => {
+test('Real map: edge columns are blocked', () => {
   for (let y = 0; y < collision.height; y++) {
-    assert.ok(isBlocked(0, y), `Tile (0, ${y}) should be blocked`);
-    assert.ok(isBlocked(33, y), `Tile (33, ${y}) should be blocked`);
+    assert.ok(callSpawnGuard('isBlocked', collision, 0, y), `Tile (0, ${y}) should be blocked`);
+    assert.ok(callSpawnGuard('isBlocked', collision, collision.width - 1, y),
+      `Tile (${collision.width - 1}, ${y}) should be blocked`);
   }
 });
 
-test('There exist walkable tiles in the interior', () => {
-  let walkableCount = 0;
-  for (let y = 1; y < collision.height - 1; y++) {
-    for (let x = 1; x < collision.width - 1; x++) {
-      if (!isBlocked(x, y)) walkableCount++;
+test('Real map: resolveNoSpawnTile never returns bottom row', () => {
+  const testRoom = { x: 5, y: 3, width: 10, height: 8 };
+  for (let i = 0; i < 20; i++) {
+    const tile = callSpawnGuard('resolveNoSpawnTile', collision, testRoom, realBottomRow);
+    if (tile) {
+      assert.notStrictEqual(tile.y, realBottomRow,
+        `Tile (${tile.x}, ${tile.y}) should not be on bottom row ${realBottomRow}`);
     }
   }
-  assert.ok(walkableCount > 100, `Should have many walkable tiles, found ${walkableCount}`);
+});
+
+test('Real map: all walkable tiles pass validation', () => {
+  const walkable = callSpawnGuard('getAllWalkableTiles', collision);
+  for (const tile of walkable.slice(0, 50)) { // Test first 50 for speed
+    const result = callSpawnGuard('isValidSpawnPosition', collision, tile, realBottomRow);
+    assert.ok(result.valid, `Walkable tile (${tile.x}, ${tile.y}) should pass validation`);
+  }
 });
 
 console.log(`\n=== Results: ${passed} passed, ${failed} failed ===\n`);
