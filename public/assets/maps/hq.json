@@ -17,7 +17,8 @@
         "friday",
         "cursor",
         "cursor-grunt",
-        "bumblebee"
+        "bumblebee",
+        "cursor-cloud"
       ]
     },
     {
@@ -131,6 +132,11 @@
       "room": "main-space",
       "x": 17,
       "y": 15
+    },
+    "cursor-cloud": {
+      "room": "cursor-room",
+      "x": 10,
+      "y": 8
     }
   },
   "furniture": {}

@@ -12,6 +12,7 @@ import {
   type CloudAgentStatus,
 } from './server/liveStatusMerge'
 import { ActivityFeed } from './server/agentActivity/activityFeed'
+import { matchAgentToAvatar } from './src/cloudAgentPoller'
 
 const CURSOR_STALE_MS = 300_000 // 5 minutes - self-healing for stuck agents
 const DEFAULT_AGENTS = ['jarvis', 'friday', 'bumblebee', 'claude-code'] as const
@@ -137,22 +138,11 @@ async function pollCloudAgentsApi(config: AgentLinksConfig, apiKey: string | und
     const newIdCache = new Map<string, CloudAgentStatus>()
 
     for (const agent of data.items || []) {
-      const agentName = agent.name || ''
-      const agentNameLower = agentName.toLowerCase()
-      let avatarId: string | null = null
-
-      for (const [id, spec] of Object.entries(config.agents)) {
-        if (id === 'jarvis') continue
-        const cloudSpec = spec.cloud || spec.cursor
-        if (!cloudSpec?.agentNameContains) continue
-        for (const hint of cloudSpec.agentNameContains) {
-          if (agentNameLower.includes(hint.toLowerCase())) {
-            avatarId = id
-            break
-          }
-        }
-        if (avatarId) break
-      }
+      const avatarId = matchAgentToAvatar(
+        { id: agent.id, name: agent.name, status: 'ACTIVE', createdAt: '', updatedAt: '' },
+        config
+      )
+      if (!avatarId) continue
 
       let runStatus: 'idle' | 'working' = 'idle'
       let detail = 'Cloud agent idle'

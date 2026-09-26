@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /**
  * Capture review screenshots via headless Chromium + Vite dev server.
- * Usage: node scripts/capture-review-screenshots.mjs [--only=wall,shadow,grok]
+ * Usage: node scripts/capture-review-screenshots.mjs [--only=wall,shadow,grok,sizes,zoom]
  */
 import { spawn } from 'node:child_process';
 import fs from 'node:fs';
@@ -12,7 +12,30 @@ import { execSync } from 'node:child_process';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const root = path.resolve(__dirname, '..');
 const outDir = path.join(root, 'docs', 'screenshots');
+const manifestPath = path.join(root, 'public/assets/manifest.json');
 const fixturesMainGrok = path.join(root, 'tests/fixtures/main-branch-sprites/grok.png');
+
+const LINEUP_AGENT_IDS = [
+  'jarvis',
+  'friday',
+  'bumblebee',
+  'cursor',
+  'claude',
+  'claude-code',
+  'grokbot',
+  'metabee',
+  'gemini',
+  'laya',
+  'cursor-cloud',
+  'apple-intelligence',
+  'claude-cowork',
+  'cursor-grunt',
+];
+
+const LINEUP_FOOT_Y = 10;
+const LINEUP_START_X = 8;
+const LINEUP_STEP_X = 2;
+const LINEUP_CLIP = { tx: 6, ty: 7, tw: 32, th: 6 };
 
 function sleep(ms) {
   return new Promise((r) => setTimeout(r, ms));
@@ -27,6 +50,11 @@ async function ensurePlaywright() {
 function startDevServer() {
   try {
     execSync('pkill -f "vite.*5173" 2>/dev/null || true', { shell: true });
+  } catch {
+    /* ignore */
+  }
+  try {
+    fs.rmSync(path.join(root, 'node_modules', '.vite'), { recursive: true, force: true });
   } catch {
     /* ignore */
   }
@@ -196,7 +224,7 @@ async function buildGrokIdleProof(page) {
     );
   }
   const html = `<!DOCTYPE html><html><body style="margin:0;background:#111;color:#eee;font:12px monospace">
-<h3 style="margin:8px">Grok frames 4× — main (old idle=f1 walk-swap) vs PR (Aaron idle=original col 2)</h3>
+<h3 style="margin:8px">Grok frames 4× — main vs PR (Aaron idle = original sheet column 2)</h3>
 <div style="display:flex;flex-wrap:wrap;gap:10px;padding:8px" id="row"></div>
 <script>
 const Z=4;
@@ -229,11 +257,148 @@ async function draw(label, url, frame) {
   console.log('Wrote grok-idle-before-after.png');
 }
 
+async function runWithDev(fn, { mainManifest = false } = {}) {
+  const original = fs.readFileSync(manifestPath, 'utf-8');
+  if (mainManifest) {
+    const main = execSync('git show origin/main:public/assets/manifest.json', {
+      cwd: root,
+      encoding: 'utf-8',
+    });
+    fs.writeFileSync(manifestPath, main);
+  }
+  const dev = startDevServer();
+  try {
+    await waitForServer('http://127.0.0.1:5173/');
+    const chromium = await ensurePlaywright();
+    const browser = await chromium.launch();
+    const page = await browser.newPage({ viewport: { width: 1400, height: 900 } });
+    await fn(page);
+    await browser.close();
+  } finally {
+    dev.kill('SIGTERM');
+    fs.writeFileSync(manifestPath, original);
+  }
+}
+
+function lineupPinsFromManifest(manifest) {
+  const ids = LINEUP_AGENT_IDS.filter((id) => manifest.agents[id]);
+  return ids.map((id, i) => `${id}@${LINEUP_START_X + i * LINEUP_STEP_X},${LINEUP_FOOT_Y}`).join(';');
+}
+
+async function captureAvatarLineup(page, outputName) {
+  const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf-8'));
+  const pins = lineupPinsFromManifest(manifest);
+  const url = `http://127.0.0.1:5173/?debugPin=${encodeURIComponent(pins)}&debugHide=1`;
+  await page.goto(url, { waitUntil: 'domcontentloaded' });
+  await waitForDashboard(page);
+  await page.waitForFunction(
+    (expected) => {
+      const dash = window.__aiDashboard;
+      if (!dash?.engine) return false;
+      const visible = dash.engine.getAgents().filter((a) => a.visibleOnMap !== false);
+      return visible.length >= Math.min(expected, 10);
+    },
+    LINEUP_AGENT_IDS.length,
+    { timeout: 60000 }
+  );
+  const clip = await tileClip(page, LINEUP_CLIP);
+  const buf = await captureCanvasClip(page, clip);
+  fs.writeFileSync(path.join(outDir, outputName), buf);
+  console.log('Wrote', outputName);
+}
+
+async function captureAgentCrop(page, agentId) {
+  const pin = `${agentId}@${LINEUP_START_X},${LINEUP_FOOT_Y}`;
+  const url = `http://127.0.0.1:5173/?debugPin=${encodeURIComponent(pin)}&debugHide=1`;
+  await page.goto(url, { waitUntil: 'domcontentloaded' });
+  await waitForDashboard(page);
+  const clip = await page.evaluate((id) => {
+    const dash = window.__aiDashboard;
+    const agent = dash.engine.getAgents().find((a) => a.id === id);
+    const canvas = document.getElementById('game-canvas');
+    const rect = canvas.getBoundingClientRect();
+    const sx = rect.width / canvas.width;
+    const sy = rect.height / canvas.height;
+    const w = 56 * sx;
+    const h = 96 * sy;
+    return {
+      x: rect.left + agent.x * sx - 12 * sx,
+      y: rect.top + agent.y * sy - 8 * sy,
+      width: w,
+      height: h,
+    };
+  }, agentId);
+  return page.screenshot({ clip });
+}
+
+async function buildZoomLineupImage(beforeCrops, afterCrops) {
+  const { chromium } = await import('playwright');
+  const browser = await chromium.launch();
+  const page = await browser.newPage({ viewport: { width: 1800, height: 900 } });
+  const ids = LINEUP_AGENT_IDS.filter((id) => beforeCrops[id] && afterCrops[id]);
+  const toB64 = (buf) => `data:image/png;base64,${buf.toString('base64')}`;
+  const cells = ids
+    .map(
+      (id) => `
+    <div style="text-align:center;margin:4px">
+      <div style="font:11px monospace;color:#ccc">${id}</div>
+      <img src="${toB64(beforeCrops[id])}" style="image-rendering:pixelated;width:168px;height:288px;object-fit:contain;background:#070b14"/>
+      <div style="font:10px monospace;color:#888">before (main)</div>
+      <img src="${toB64(afterCrops[id])}" style="image-rendering:pixelated;width:168px;height:288px;object-fit:contain;background:#070b14;margin-top:4px"/>
+      <div style="font:10px monospace;color:#8cf">after (PR)</div>
+    </div>`
+    )
+    .join('');
+  const html = `<!DOCTYPE html><html><body style="margin:0;background:#0b0c1e;color:#eee">
+  <h3 style="font:14px monospace;padding:8px">Avatar lineup 4× zoom (open floor row)</h3>
+  <div style="display:flex;flex-wrap:wrap;padding:8px">${cells}</div></body></html>`;
+  const htmlPath = path.join(root, '.tmp-screenshots/zoom-lineup.html');
+  fs.mkdirSync(path.dirname(htmlPath), { recursive: true });
+  fs.writeFileSync(htmlPath, html);
+  await page.goto('file://' + htmlPath);
+  await sleep(500);
+  await page.screenshot({
+    path: path.join(outDir, 'avatar-sizes-lineup-zoom.png'),
+    fullPage: true,
+  });
+  await browser.close();
+  console.log('Wrote avatar-sizes-lineup-zoom.png');
+}
+
+async function captureAvatarZoomLineup() {
+  const beforeCrops = {};
+  const afterCrops = {};
+  const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf-8'));
+  const ids = LINEUP_AGENT_IDS.filter((id) => manifest.agents[id]);
+  await runWithDev(async (page) => {
+    for (const id of ids) beforeCrops[id] = await captureAgentCrop(page, id);
+  }, { mainManifest: true });
+  await runWithDev(async (page) => {
+    for (const id of ids) afterCrops[id] = await captureAgentCrop(page, id);
+  });
+  await buildZoomLineupImage(beforeCrops, afterCrops);
+}
+
 async function main() {
   const args = process.argv.slice(2);
   const only = args.find((a) => a.startsWith('--only='))?.split('=')[1]?.split(',') ?? null;
 
   fs.mkdirSync(outDir, { recursive: true });
+  const onlySizes = only && only.length === 1 && only[0] === 'sizes';
+  const onlyZoom = only && only.length === 1 && only[0] === 'zoom';
+  if (onlyZoom) {
+    await captureAvatarZoomLineup();
+    return;
+  }
+  if (onlySizes) {
+    await runWithDev((page) => captureAvatarLineup(page, 'avatar-sizes-before.png'), {
+      mainManifest: true,
+    });
+    await runWithDev((page) => captureAvatarLineup(page, 'avatar-sizes-after.png'));
+    await captureAvatarZoomLineup();
+    return;
+  }
+
   const chromium = await ensurePlaywright();
   const dev = startDevServer();
   try {
@@ -270,6 +435,14 @@ async function main() {
     await browser.close();
   } finally {
     dev.kill('SIGTERM');
+  }
+
+  if (!only || only.includes('sizes')) {
+    await runWithDev((page) => captureAvatarLineup(page, 'avatar-sizes-before.png'), {
+      mainManifest: true,
+    });
+    await runWithDev((page) => captureAvatarLineup(page, 'avatar-sizes-after.png'));
+    await captureAvatarZoomLineup();
   }
 }
 

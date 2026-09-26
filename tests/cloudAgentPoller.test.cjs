@@ -2,71 +2,17 @@
 /**
  * Unit tests for cloud agent mapping logic
  *
- * Run with: node tests/cloudAgentPoller.test.js
+ * Imports the real matchAgentToAvatar function from src/cloudAgentPoller.ts
+ * using tsx. Fails hard if the import fails.
+ *
+ * Run with: node tests/cloudAgentPoller.test.cjs
  */
 
-function matchAgentToAvatar(agent, config) {
-  const agentName = (agent.name || '').toLowerCase();
+const assert = require('assert');
+const { execSync } = require('child_process');
+const path = require('path');
 
-  for (const [avatarId, spec] of Object.entries(config.agents)) {
-    if (avatarId === 'jarvis') continue;
-
-    const cloudSpec = spec.cloud || spec.cursor;
-    if (!cloudSpec) continue;
-
-    const nameHints = cloudSpec.agentNameContains || [];
-    for (const hint of nameHints) {
-      if (agentName.includes(hint.toLowerCase())) {
-        return avatarId;
-      }
-    }
-  }
-
-  return null;
-}
-
-function runStatusToAgentStatus(run) {
-  if (!run) {
-    return { status: 'idle', detail: 'No active run' };
-  }
-
-  switch (run.status) {
-    case 'CREATING':
-      return { status: 'working', detail: 'Starting cloud agent...', activity: 'planning' };
-    case 'RUNNING':
-      return { status: 'working', detail: 'Cloud agent running', activity: 'thinking' };
-    case 'FINISHED':
-      return { status: 'idle', detail: run.result ? `Finished: ${run.result.slice(0, 50)}` : 'Finished' };
-    case 'ERROR':
-      return { status: 'idle', detail: 'Run errored' };
-    case 'CANCELLED':
-      return { status: 'idle', detail: 'Run cancelled' };
-    case 'EXPIRED':
-      return { status: 'idle', detail: 'Run expired' };
-    default:
-      return { status: 'idle', detail: 'Unknown status' };
-  }
-}
-
-const testConfig = {
-  version: 2,
-  agents: {
-    jarvis: {
-      label: 'J.A.R.V.I.S.',
-      cursor: { agentNameContains: ['jarvis'] },
-    },
-    friday: {
-      label: 'F.R.I.D.A.Y.',
-      cursor: { agentNameContains: ['friday', 'f.r.i.d.a.y'] },
-      cloud: { agentNameContains: ['friday', 'f.r.i.d.a.y', 'cloud coordinator', 'troubleshoot'] },
-    },
-    bumblebee: {
-      label: 'Bumblebee',
-      cursor: { agentNameContains: ['bumblebee', 'cloud-worker'] },
-      cloud: { agentNameContains: ['bumblebee', 'cloud-worker', 'cloud worker', 'background agent'] },
-    },
-  },
-};
+console.log('\n=== Cloud Agent Poller Tests ===\n');
 
 let passed = 0;
 let failed = 0;
@@ -95,7 +41,89 @@ function assertIncludes(str, substr) {
   }
 }
 
-console.log('\n=== matchAgentToAvatar tests ===\n');
+// Import the real matchAgentToAvatar function using tsx
+let matchAgentToAvatar;
+try {
+  const tsxPath = path.resolve(__dirname, '../node_modules/.bin/tsx');
+  const modulePath = path.resolve(__dirname, '../src/cloudAgentPoller.ts');
+  
+  const code = `
+    const m = require('${modulePath.replace(/\\/g, '\\\\')}');
+    const testAgent = { id: 'test', name: 'friday test', status: 'ACTIVE' };
+    const testConfig = {
+      version: 2,
+      agents: {
+        friday: { cloud: { agentNameContains: ['friday'] } },
+        'cursor-cloud': { cloud: { catchAll: true } }
+      }
+    };
+    console.log(JSON.stringify({
+      hasFunction: typeof m.matchAgentToAvatar === 'function',
+      testResult: m.matchAgentToAvatar(testAgent, testConfig)
+    }));
+  `;
+  
+  const result = execSync(`"${tsxPath}" -e "${code.replace(/"/g, '\\"').replace(/\n/g, ' ')}"`, {
+    encoding: 'utf-8',
+    cwd: path.resolve(__dirname, '..'),
+  });
+  
+  const parsed = JSON.parse(result.trim());
+  if (!parsed.hasFunction) {
+    throw new Error('matchAgentToAvatar is not exported from cloudAgentPoller.ts');
+  }
+  if (parsed.testResult !== 'friday') {
+    throw new Error(`Self-test failed: expected 'friday', got '${parsed.testResult}'`);
+  }
+  
+  // Create a wrapper that calls tsx for each test
+  matchAgentToAvatar = (agent, config) => {
+    const agentJson = JSON.stringify(agent).replace(/"/g, '\\"');
+    const configJson = JSON.stringify(config).replace(/"/g, '\\"');
+    const code = `
+      const m = require('${modulePath.replace(/\\/g, '\\\\')}');
+      console.log(JSON.stringify(m.matchAgentToAvatar(${JSON.stringify(agent)}, ${JSON.stringify(config)})));
+    `;
+    const res = execSync(`"${tsxPath}" -e "${code.replace(/"/g, '\\"').replace(/\n/g, ' ')}"`, {
+      encoding: 'utf-8',
+      cwd: path.resolve(__dirname, '..'),
+    });
+    return JSON.parse(res.trim());
+  };
+  
+  console.log('✓ Successfully imported real matchAgentToAvatar from cloudAgentPoller.ts\n');
+} catch (e) {
+  console.error('FATAL: Failed to import src/cloudAgentPoller.ts');
+  console.error('Make sure tsx is installed: npm install --save-dev tsx');
+  console.error('Error:', e.message);
+  process.exit(1);
+}
+
+const testConfig = {
+  version: 2,
+  agents: {
+    jarvis: {
+      label: 'J.A.R.V.I.S.',
+      cursor: { agentNameContains: ['jarvis'] },
+    },
+    friday: {
+      label: 'F.R.I.D.A.Y.',
+      cursor: { agentNameContains: ['friday', 'f.r.i.d.a.y'] },
+      cloud: { agentNameContains: ['friday', 'f.r.i.d.a.y', 'cloud coordinator', 'troubleshoot'] },
+    },
+    bumblebee: {
+      label: 'Bumblebee',
+      cursor: { agentNameContains: ['bumblebee', 'cloud-worker'] },
+      cloud: { agentNameContains: ['bumblebee', 'cloud-worker', 'cloud worker', 'background agent'] },
+    },
+    'cursor-cloud': {
+      label: 'Cursor Cloud (catch-all)',
+      cloud: { catchAll: true },
+    },
+  },
+};
+
+console.log('--- matchAgentToAvatar tests ---\n');
 
 test('matches friday by name', () => {
   const agent = { id: 'bc-123', name: 'F.R.I.D.A.Y. troubleshooting', status: 'ACTIVE' };
@@ -124,38 +152,97 @@ test('matches bumblebee by background agent hint', () => {
 
 test('does not match jarvis (local only)', () => {
   const agent = { id: 'bc-789', name: 'JARVIS assistant', status: 'ACTIVE' };
-  assertEqual(matchAgentToAvatar(agent, testConfig), null);
+  assertEqual(matchAgentToAvatar(agent, testConfig), 'cursor-cloud');
 });
 
 test('returns null for unmatched agents', () => {
   const agent = { id: 'bc-000', name: 'Random Task Agent', status: 'ACTIVE' };
-  assertEqual(matchAgentToAvatar(agent, testConfig), null);
+  assertEqual(matchAgentToAvatar(agent, testConfig), 'cursor-cloud');
 });
 
 test('handles missing name', () => {
   const agent = { id: 'bc-000', status: 'ACTIVE' };
-  assertEqual(matchAgentToAvatar(agent, testConfig), null);
+  assertEqual(matchAgentToAvatar(agent, testConfig), 'cursor-cloud');
 });
 
-console.log('\n=== runStatusToAgentStatus tests ===\n');
+const testConfigNoCatchAll = {
+  version: 2,
+  agents: {
+    friday: {
+      label: 'F.R.I.D.A.Y.',
+      cloud: { agentNameContains: ['friday'] },
+    },
+  },
+};
+
+test('returns null when no catch-all configured', () => {
+  const agent = { id: 'bc-000', name: 'Random Agent', status: 'ACTIVE' };
+  assertEqual(matchAgentToAvatar(agent, testConfigNoCatchAll), null);
+});
+
+console.log('\n--- runStatusToAgentStatus tests (real function) ---\n');
+
+// Import the real runStatusToAgentStatus function using tsx
+let runStatusToAgentStatus;
+try {
+  const tsxPath = path.resolve(__dirname, '../node_modules/.bin/tsx');
+  const modulePath = path.resolve(__dirname, '../src/cloudAgentPoller.ts');
+  
+  // Create a wrapper that calls the real function
+  runStatusToAgentStatus = (run, agent = { id: 'test-agent' }) => {
+    const code = `
+      const m = require('${modulePath.replace(/\\/g, '\\\\')}');
+      const run = ${JSON.stringify(run)};
+      const agent = ${JSON.stringify(agent)};
+      console.log(JSON.stringify(m.runStatusToAgentStatus(run, agent)));
+    `;
+    const res = execSync(`"${tsxPath}" -e "${code.replace(/"/g, '\\"').replace(/\n/g, ' ')}"`, {
+      encoding: 'utf-8',
+      cwd: path.resolve(__dirname, '..'),
+    });
+    return JSON.parse(res.trim());
+  };
+  
+  // Verify the function exists
+  const verifyCode = `
+    const m = require('${modulePath.replace(/\\/g, '\\\\')}');
+    console.log(typeof m.runStatusToAgentStatus === 'function');
+  `;
+  const verifyResult = execSync(`"${tsxPath}" -e "${verifyCode.replace(/"/g, '\\"').replace(/\n/g, ' ')}"`, {
+    encoding: 'utf-8',
+    cwd: path.resolve(__dirname, '..'),
+  });
+  if (verifyResult.trim() !== 'true') {
+    throw new Error('runStatusToAgentStatus is not exported');
+  }
+  
+  console.log('✓ Successfully imported real runStatusToAgentStatus from cloudAgentPoller.ts\n');
+} catch (e) {
+  console.error('FATAL: Failed to import runStatusToAgentStatus from cloudAgentPoller.ts');
+  console.error('Error:', e.message);
+  process.exit(1);
+}
+
+const testAgent = { id: 'bc-123', name: 'Test Agent', status: 'ACTIVE' };
 
 test('handles CREATING run', () => {
   const run = { id: 'run-1', agentId: 'bc-123', status: 'CREATING' };
-  const status = runStatusToAgentStatus(run);
+  const status = runStatusToAgentStatus(run, testAgent);
   assertEqual(status.status, 'working');
   assertEqual(status.activity, 'planning');
+  assertEqual(status.cloudAgentId, 'bc-123');
 });
 
 test('handles RUNNING run', () => {
   const run = { id: 'run-1', agentId: 'bc-123', status: 'RUNNING' };
-  const status = runStatusToAgentStatus(run);
+  const status = runStatusToAgentStatus(run, testAgent);
   assertEqual(status.status, 'working');
   assertEqual(status.activity, 'thinking');
 });
 
 test('handles FINISHED run with result', () => {
   const run = { id: 'run-1', agentId: 'bc-123', status: 'FINISHED', result: 'Added README.md' };
-  const status = runStatusToAgentStatus(run);
+  const status = runStatusToAgentStatus(run, testAgent);
   assertEqual(status.status, 'idle');
   assertIncludes(status.detail, 'Finished');
   assertIncludes(status.detail, 'Added README.md');
@@ -163,32 +250,32 @@ test('handles FINISHED run with result', () => {
 
 test('handles FINISHED run without result', () => {
   const run = { id: 'run-1', agentId: 'bc-123', status: 'FINISHED' };
-  const status = runStatusToAgentStatus(run);
+  const status = runStatusToAgentStatus(run, testAgent);
   assertEqual(status.status, 'idle');
   assertEqual(status.detail, 'Finished');
 });
 
 test('handles ERROR run', () => {
   const run = { id: 'run-1', agentId: 'bc-123', status: 'ERROR' };
-  const status = runStatusToAgentStatus(run);
+  const status = runStatusToAgentStatus(run, testAgent);
   assertEqual(status.status, 'idle');
   assertEqual(status.detail, 'Run errored');
 });
 
 test('handles CANCELLED run', () => {
   const run = { id: 'run-1', agentId: 'bc-123', status: 'CANCELLED' };
-  const status = runStatusToAgentStatus(run);
+  const status = runStatusToAgentStatus(run, testAgent);
   assertEqual(status.status, 'idle');
   assertEqual(status.detail, 'Run cancelled');
 });
 
 test('handles null run', () => {
-  const status = runStatusToAgentStatus(null);
+  const status = runStatusToAgentStatus(null, testAgent);
   assertEqual(status.status, 'idle');
   assertEqual(status.detail, 'No active run');
 });
 
-console.log('\n=== Integration scenario ===\n');
+console.log('\n--- Integration scenario ---\n');
 
 test('full workflow: cloud agent starts, runs, finishes', () => {
   const agent = { id: 'bc-123', name: 'Bumblebee Protocol', status: 'ACTIVE', latestRunId: 'run-1' };
