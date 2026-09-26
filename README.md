@@ -47,12 +47,16 @@ A retro pixel-art dashboard where AI agents walk around like characters in an ol
 
 - Node.js 18+
 - npm or yarn
+- Python 3.9+ with [Pillow](https://pypi.org/project/Pillow/) for sprite pipeline tests (`pip install -r requirements.txt`)
 
 ### Installation
 
 ```bash
 # Install dependencies
 npm install
+
+# Optional: Python deps for sprite conversion scripts and npm test sprite checks
+pip install -r requirements.txt
 
 # Start development server (web)
 npm run dev

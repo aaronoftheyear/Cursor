@@ -6,6 +6,8 @@ Uses ONE scale per sheet from the widest/tallest source bbox so side-facing fram
 are scaled down to match down/up (never upscaling narrow frames to fill cell width).
 """
 
+from __future__ import annotations
+
 import argparse
 import sys
 from pathlib import Path

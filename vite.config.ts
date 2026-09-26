@@ -27,8 +27,62 @@ interface AgentLinksConfig {
     }
     cloud?: {
       agentNameContains?: string[]
+      catchAll?: boolean
     }
   }>
+}
+
+/** @internal Builds one cloud poll status row (regression-tested for cloudAgentName). */
+export function buildPolledCloudAgentStatus(
+  agent: { id: string; name?: string },
+  runStatus: 'idle' | 'working',
+  detail: string
+): CloudAgentStatus {
+  const status: CloudAgentStatus = {
+    status: runStatus,
+    detail,
+    source: 'cloud-api',
+    cloudAgentId: agent.id,
+    cloudAgentName: agent.name,
+  }
+  if (runStatus === 'working') {
+    status.activity = 'thinking'
+    status.activityDepth = 'deep'
+  }
+  return status
+}
+
+/** @internal Maps a mocked agents list response like pollCloudAgentsApi (no HTTP). */
+export function mapCloudAgentPollItems(
+  items: Array<{ id: string; name?: string; latestRunId?: string }>,
+  config: AgentLinksConfig,
+  getRunState: (agent: { id: string; name?: string; latestRunId?: string }) => {
+    runStatus: 'idle' | 'working'
+    detail: string
+  } = () => ({ runStatus: 'idle', detail: 'Cloud agent idle' })
+): { avatarCache: Map<string, CloudAgentStatus>; idCache: Map<string, CloudAgentStatus> } {
+  const newCache = new Map<string, CloudAgentStatus>()
+  const newIdCache = new Map<string, CloudAgentStatus>()
+
+  for (const agent of items || []) {
+    const avatarId = matchAgentToAvatar(
+      { id: agent.id, name: agent.name, status: 'ACTIVE', createdAt: '', updatedAt: '' },
+      config
+    )
+    if (!avatarId) continue
+
+    const { runStatus, detail } = getRunState(agent)
+    const status = buildPolledCloudAgentStatus(agent, runStatus, detail)
+
+    newIdCache.set(agent.id, status)
+
+    const existing = newCache.get(avatarId)
+    if (!existing || (status.status === 'working' && existing.status !== 'working')) {
+      newCache.set(avatarId, status)
+    }
+  }
+
+  return { avatarCache: newCache, idCache: newIdCache }
 }
 
 // Cloud agent poller state
@@ -175,17 +229,7 @@ async function pollCloudAgentsApi(config: AgentLinksConfig, apiKey: string | und
         }
       }
 
-      const status: CloudAgentStatus = {
-        status: runStatus,
-        detail,
-        source: 'cloud-api',
-        cloudAgentId: agent.id,
-        cloudAgentName: agentName,
-      }
-      if (runStatus === 'working') {
-        status.activity = 'thinking'
-        status.activityDepth = 'deep'
-      }
+      const status = buildPolledCloudAgentStatus(agent, runStatus, detail)
 
       // Store in id cache for all agents (for waiting-on checks)
       newIdCache.set(agent.id, status)
