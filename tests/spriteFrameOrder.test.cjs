@@ -66,6 +66,11 @@ const RECONVERTED_PIPELINE = {
     idleCol: 1,
     kind: 'rpg',
   },
+  'cursor_grunt01.png': {
+    sheet: 'public/assets/sprites/sheets/cursor-grunt01.png',
+    idleCol: 1,
+    kind: 'rpg',
+  },
 };
 
 const DIRECTION_ORIGINS = { down: 0, up: 3, left: 6 };

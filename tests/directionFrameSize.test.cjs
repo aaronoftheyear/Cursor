@@ -125,5 +125,23 @@ test('Jarvis left/down idle heights match within 1px', () => {
   assert.ok(Math.abs(byDir.down.h - byDir.left.h) <= MAX_SPREAD_PX);
 });
 
+test('cursor: idle visible height within 1px in down/left/up/right strip slots', () => {
+  const spritePath = path.join(spritesDir, 'cursor_grunt01.png');
+  const png = PNG.sync.read(fs.readFileSync(spritePath));
+  const frameIndex = { down: 0, up: 3, left: 6, right: 9 };
+  const heights = {};
+  for (const [dir, idx] of Object.entries(frameIndex)) {
+    const box = visibleBox(png, idx);
+    heights[dir] = box ? box.h : 0;
+  }
+  const active = Object.values(heights).filter((h) => h > 0);
+  assert.ok(active.length >= 3, 'expected down/up/left idle pixels');
+  const spread = Math.max(...active) - Math.min(...active);
+  assert.ok(
+    spread <= MAX_SPREAD_PX,
+    `cursor height spread ${spread}px (${JSON.stringify(heights)})`
+  );
+});
+
 console.log(`\n=== Results: ${passed} passed, ${failed} failed ===\n`);
 process.exit(failed > 0 ? 1 : 0);
