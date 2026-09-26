@@ -186,22 +186,20 @@ const SWAPPED_COMPARE_MAIN = SWAPPED_SPRITES.filter((s) => !(s in RECONVERTED_PI
 
 for (const sprite of SWAPPED_COMPARE_MAIN) {
   for (const [dir, origin] of Object.entries(DIRECTION_ORIGINS)) {
-    const mainCol = dir === 'left' ? STRIP_COL_IDLE : STRIP_COL_WALK1;
-    const mainColLabel = dir === 'left' ? 'idle' : 'walk1';
-    test(`${sprite} ${dir}: PR pos ${STRIP_COL_IDLE} = main pos ${mainCol} (${mainColLabel})`, () => {
+    test(`${sprite} ${dir}: PR pos ${STRIP_COL_IDLE} = main pos ${STRIP_COL_WALK1}`, () => {
       const currentBuffer = getCurrentSpriteBuffer(sprite);
       assert.ok(currentBuffer, `Current sprite ${sprite} not found`);
 
       const mainBuffer = getMainSpriteBuffer(sprite);
       const prIdlePos = origin + STRIP_COL_IDLE;
-      const mainComparePos = origin + mainCol;
+      const mainWalk1Pos = origin + STRIP_COL_WALK1;
 
       const prFrame = extractFramePixels(currentBuffer, prIdlePos);
-      const mainFrame = extractFramePixels(mainBuffer, mainComparePos);
+      const mainFrame = extractFramePixels(mainBuffer, mainWalk1Pos);
 
       assert.ok(
         prFrame.equals(mainFrame),
-        `${sprite} ${dir}: PR frame ${prIdlePos} should equal main frame ${mainComparePos}`
+        `${sprite} ${dir}: PR frame ${prIdlePos} should equal main frame ${mainWalk1Pos}`
       );
     });
   }
