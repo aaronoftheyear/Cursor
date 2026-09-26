@@ -74,7 +74,31 @@ export function engineGameSpawnFootTile(
 ): TileCoord | null {
   const tile = engineResolveSpawnFootTile(collisionMap, room, walkableFallback);
   if (tile && canOccupyTile(tile)) return tile;
-  const bottomRow = engineSpawnBottomRow(collisionMap.height);
+  return engineSpawnOccupiedFallback(collisionMap.height, walkableFallback, canOccupyTile);
+}
+
+/**
+ * Preferred-tile branch of resolveSpawnFootTile (exported for spawn regression tests).
+ */
+export function enginePreferredSpawnFootTile(
+  preferred: TileCoord,
+  mapHeight: number,
+  canOccupyPreferred: boolean
+): TileCoord | null {
+  const bottomRow = engineSpawnBottomRow(mapHeight);
+  if (canOccupyPreferred && preferred.y !== bottomRow) {
+    return preferred;
+  }
+  return null;
+}
+
+/** Occupied-tile shuffle fallback used by engineGameSpawnFootTile / GameEngine. */
+export function engineSpawnOccupiedFallback(
+  mapHeight: number,
+  walkableFallback: TileCoord[],
+  canOccupyTile: (tile: TileCoord) => boolean
+): TileCoord | null {
+  const bottomRow = engineSpawnBottomRow(mapHeight);
   const shuffled = [...filterOutBottomRow(walkableFallback, bottomRow)].sort(() => Math.random() - 0.5);
   for (const fallback of shuffled) {
     if (canOccupyTile(fallback)) return fallback;
@@ -278,9 +302,13 @@ export class GameEngine {
     if (!agent) return preferred ?? null;
     
     if (preferred) {
-      if (this.canOccupyTile(preferred.x, preferred.y, agent)) {
-        return preferred;
-      }
+      const mapHeight = this.mapGrid?.height ?? 0;
+      const picked = enginePreferredSpawnFootTile(
+        preferred,
+        mapHeight || 1,
+        this.canOccupyTile(preferred.x, preferred.y, agent)
+      );
+      if (picked) return picked;
       return this.findNearestWalkableFootTile(agent, preferred);
     }
     

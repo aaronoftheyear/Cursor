@@ -186,20 +186,22 @@ const SWAPPED_COMPARE_MAIN = SWAPPED_SPRITES.filter((s) => !(s in RECONVERTED_PI
 
 for (const sprite of SWAPPED_COMPARE_MAIN) {
   for (const [dir, origin] of Object.entries(DIRECTION_ORIGINS)) {
-    test(`${sprite} ${dir}: PR pos ${STRIP_COL_IDLE} = main pos ${STRIP_COL_WALK1}`, () => {
+    const mainCol = dir === 'left' ? STRIP_COL_IDLE : STRIP_COL_WALK1;
+    const mainColLabel = dir === 'left' ? 'idle' : 'walk1';
+    test(`${sprite} ${dir}: PR pos ${STRIP_COL_IDLE} = main pos ${mainCol} (${mainColLabel})`, () => {
       const currentBuffer = getCurrentSpriteBuffer(sprite);
       assert.ok(currentBuffer, `Current sprite ${sprite} not found`);
 
       const mainBuffer = getMainSpriteBuffer(sprite);
       const prIdlePos = origin + STRIP_COL_IDLE;
-      const mainWalk1Pos = origin + STRIP_COL_WALK1;
+      const mainComparePos = origin + mainCol;
 
       const prFrame = extractFramePixels(currentBuffer, prIdlePos);
-      const mainFrame = extractFramePixels(mainBuffer, mainWalk1Pos);
+      const mainFrame = extractFramePixels(mainBuffer, mainComparePos);
 
       assert.ok(
         prFrame.equals(mainFrame),
-        `${sprite} ${dir}: PR frame ${prIdlePos} should equal main frame ${mainWalk1Pos}`
+        `${sprite} ${dir}: PR frame ${prIdlePos} should equal main frame ${mainComparePos}`
       );
     });
   }
@@ -241,26 +243,17 @@ for (const [dir, origin] of Object.entries(DIRECTION_ORIGINS)) {
   });
 }
 
-console.log('\n--- Bumblebee: native frame order 123456789 (no 213 swap) ---\n');
+console.log('\n--- Bumblebee: byte-identical to main (123456789, do not re-convert) ---\n');
 
-for (const [dir, origin] of Object.entries(DIRECTION_ORIGINS)) {
-  test(`${BUMBLEBEE_SPRITE} ${dir}: PR idle matches convert pipeline (no reorder)`, () => {
-    const currentBuffer = getCurrentSpriteBuffer(BUMBLEBEE_SPRITE);
-    assert.ok(currentBuffer, `Missing ${BUMBLEBEE_SPRITE}`);
-    const root = path.resolve(__dirname, '..');
-    const tmpStrip = path.join(__dirname, '../.tmp-screenshots/bumblebee-expected.png');
-    fs.mkdirSync(path.dirname(tmpStrip), { recursive: true });
-    execSync(
-      `python3 scripts/convert-rpg-sheet.py "${path.join(root, 'public/assets/sprites/sheets/bumblebee.png')}" "${tmpStrip}" --idle-col 1`,
-      { cwd: root, stdio: 'pipe' }
-    );
-    const expectedBuffer = fs.readFileSync(tmpStrip);
-    const prIdlePos = origin + STRIP_COL_IDLE;
-    const prFrame = extractFramePixels(currentBuffer, prIdlePos);
-    const expectedFrame = extractFramePixels(expectedBuffer, prIdlePos);
-    assert.ok(prFrame.equals(expectedFrame), `${BUMBLEBEE_SPRITE} ${dir}: idle must match native-order pipeline`);
-  });
-}
+test(`${BUMBLEBEE_SPRITE}: PR file matches main-branch fixture bytes`, () => {
+  const currentBuffer = getCurrentSpriteBuffer(BUMBLEBEE_SPRITE);
+  assert.ok(currentBuffer, `Missing ${BUMBLEBEE_SPRITE}`);
+  const mainBuffer = getMainSpriteBuffer(BUMBLEBEE_SPRITE);
+  assert.ok(
+    currentBuffer.equals(mainBuffer),
+    `${BUMBLEBEE_SPRITE} must be byte-identical to origin/main (no re-convert on PR #3)`
+  );
+});
 
 console.log('\n--- Metabee: idle = main position 0 (no swap) ---\n');
 

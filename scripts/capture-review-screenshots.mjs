@@ -243,18 +243,18 @@ async function main() {
 
     const scenes = [
       {
-        key: 'wall',
-        name: 'wall-front-over-avatar.png',
-        pin: 'jarvis@14,12',
-        clip: { tx: 11, ty: 9, tw: 6, th: 6 },
-        labels: ['6×6 tiles (no avatar)', 'Jarvis @14,12 — wall-front overlap check'],
+        key: 'shadow87',
+        name: 'shadow-under-furniture-8-7.png',
+        pin: 'jarvis@8,7',
+        clip: { tx: 5, ty: 4, tw: 6, th: 6 },
+        labels: ['6×6 @8,7 (no avatar)', 'Jarvis @8,7 — shadow under furniture-mid'],
       },
       {
-        key: 'shadow',
-        name: 'shadow-under-furniture.png',
-        pin: 'jarvis@17,7',
-        clip: { tx: 14, ty: 4, tw: 6, th: 6 },
-        labels: ['6×6 tiles (no avatar)', 'Jarvis @17,7 — shadow vs furniture-mid'],
+        key: 'shadow1715',
+        name: 'shadow-under-furniture-17-15.png',
+        pin: 'jarvis@17,15',
+        clip: { tx: 14, ty: 12, tw: 6, th: 6 },
+        labels: ['6×6 @17,15 (no avatar)', 'Jarvis @17,15 — shadow under furniture-mid'],
       },
     ];
 

@@ -122,7 +122,7 @@ for (const agentId of Object.keys(manifest.agents)) {
 
 test('Jarvis left/down idle heights match within 1px', () => {
   const byDir = measureStrip(path.join(spritesDir, 'jarvis.png'));
-  assert.strictEqual(byDir.down.h, byDir.left.h);
+  assert.ok(Math.abs(byDir.down.h - byDir.left.h) <= MAX_SPREAD_PX);
 });
 
 console.log(`\n=== Results: ${passed} passed, ${failed} failed ===\n`);

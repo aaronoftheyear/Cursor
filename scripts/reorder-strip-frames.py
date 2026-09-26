@@ -36,8 +36,9 @@ def reorder_strip(input_path: Path, output_path: Path = None) -> None:
         frame = img.crop((x, 0, x + frame_width, frame_height))
         frames.append(frame)
     
-    # New order: 2,1,3,5,4,6,8,7,9 (convert to 0-based: 1,0,2,4,3,5,7,6,8)
-    new_order = [1, 0, 2, 4, 3, 5, 7, 6, 8]
+    # Down/up: swap idle↔walk1 (2,1,3 and 5,4,6). Left: keep idle at col 6 (7,8,9 not 8,7,9)
+    # so STRIP_COL_IDLE at origin 6 is side idle art, not walk1 (avoids taller side idle).
+    new_order = [1, 0, 2, 4, 3, 5, 6, 7, 8]
     
     # Create new image
     new_img = Image.new('RGBA', (144, 32))

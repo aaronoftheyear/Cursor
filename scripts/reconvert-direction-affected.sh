@@ -20,7 +20,4 @@ reconvert_rpg "claude-grunt01.png" "claude.png"
 reconvert_rpg "claude-cowork.png" "claude_cowork.png"
 reconvert_rpg "cluade-code.png" "claude_code.png"
 
-# Bumblebee: Aaron's original frame order 123456789 (no 213 swap).
-python3 "$ROOT/scripts/convert-rpg-sheet.py" "$SHEETS/bumblebee.png" "$OUT/bumblebee.png" --idle-col 1
-
-echo "Re-converted direction-affected RPG sprites (Grok/Cursor grunts unchanged)."
+echo "Re-converted direction-affected RPG sprites (Grok/Cursor grunts unchanged; bumblebee stays main bytes)."

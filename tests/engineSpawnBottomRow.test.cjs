@@ -172,6 +172,131 @@ test('occupied tile rejection tries another walkable tile', () => {
   assert.ok(ok, 'fallback must eventually return a non-blocked walkable tile');
 });
 
+test('engineSpawnOccupiedFallback returns first free walkable in list', () => {
+  const code = `
+    const { engineSpawnOccupiedFallback } = require('./src/engine.ts');
+    const tile = engineSpawnOccupiedFallback(${walkableBottomMap.height}, [{ x: 2, y: 1 }, { x: 3, y: 1 }], (t) => t.x === 3);
+    console.log(JSON.stringify(tile));
+  `;
+  const tile = JSON.parse(
+    execSync(`"${tsxPath}" -e "${code.replace(/"/g, '\\"').replace(/\n/g, ' ')}"`, {
+      cwd: root,
+      encoding: 'utf-8',
+    }).trim()
+  );
+  assert.deepStrictEqual(tile, { x: 3, y: 1 });
+});
+
+test('engineSpawnOccupiedFallback picks alternate when resolver tile blocked', () => {
+  const code = `
+    const { engineGameSpawnFootTile } = require('./src/engine.ts');
+    const map = ${JSON.stringify(walkableBottomMap)};
+    const walkables = [{ x: 2, y: 1 }, { x: 3, y: 1 }];
+    let sawFallback = false;
+    for (let i = 0; i < 40; i++) {
+      const tile = engineGameSpawnFootTile(map, null, walkables, (t) => t.x === 3);
+      if (tile && tile.x === 3 && tile.y === 1) sawFallback = true;
+    }
+    console.log(JSON.stringify(sawFallback));
+  `;
+  const sawFallback = JSON.parse(
+    execSync(`"${tsxPath}" -e "${code.replace(/"/g, '\\"').replace(/\n/g, ' ')}"`, {
+      cwd: root,
+      encoding: 'utf-8',
+    }).trim()
+  );
+  assert.ok(sawFallback, 'occupied resolver tile must fall back to another walkable');
+});
+
+test('enginePreferredSpawnFootTile rejects bottom-row preferred tile', () => {
+  const tile = callEngine('enginePreferredSpawnFootTile', { x: 2, y: bottomRow }, walkableBottomMap.height, true);
+  assert.strictEqual(tile, null);
+  const ok = callEngine('enginePreferredSpawnFootTile', { x: 2, y: 1 }, walkableBottomMap.height, true);
+  assert.deepStrictEqual(ok, { x: 2, y: 1 });
+});
+
+test('engine.ts mutation deleting occupied fallback fails probe', () => {
+  const original = fs.readFileSync(enginePath, 'utf-8');
+  const mutated = original.replace(
+    `  for (const fallback of shuffled) {
+    if (canOccupyTile(fallback)) return fallback;
+  }`,
+    '  /* fallback removed */'
+  );
+  assert.notStrictEqual(mutated, original);
+  fs.writeFileSync(enginePath, mutated);
+  try {
+    let caught = false;
+    try {
+      const code = `
+        const { engineSpawnOccupiedFallback } = require('./src/engine.ts');
+        const tile = engineSpawnOccupiedFallback(${walkableBottomMap.height}, [{ x: 2, y: 1 }, { x: 3, y: 1 }], (t) => t.x === 3);
+        console.log(JSON.stringify(tile));
+      `;
+      const tile = JSON.parse(
+        execSync(`"${tsxPath}" -e "${code.replace(/"/g, '\\"').replace(/\n/g, ' ')}"`, {
+          cwd: root,
+          encoding: 'utf-8',
+        }).trim()
+      );
+      assert.deepStrictEqual(tile, { x: 3, y: 1 });
+    } catch {
+      caught = true;
+    }
+    assert.ok(caught, 'without occupied fallback loop, blocked tiles cannot spawn');
+  } finally {
+    fs.writeFileSync(enginePath, original);
+  }
+});
+
+test('engine.ts mutation preferred bottom row fails probe', () => {
+  const original = fs.readFileSync(enginePath, 'utf-8');
+  const mutated = original.replace(
+    'if (canOccupyPreferred && preferred.y !== bottomRow) {',
+    'if (canOccupyPreferred) {'
+  );
+  assert.notStrictEqual(mutated, original);
+  fs.writeFileSync(enginePath, mutated);
+  try {
+    let caught = false;
+    try {
+      const tile = callEngine(
+        'enginePreferredSpawnFootTile',
+        { x: 1, y: bottomRow },
+        walkableBottomMap.height,
+        true
+      );
+      assert.strictEqual(tile, null, 'preferred spawn on bottom row must remain blocked');
+    } catch {
+      caught = true;
+    }
+    assert.ok(caught, 'mutation allowing bottom-row preferred tile must fail probe');
+  } finally {
+    fs.writeFileSync(enginePath, original);
+  }
+});
+
+test('engine.ts mutation force {0,height-1} in engineGameSpawnFootTile fails probe', () => {
+  const original = fs.readFileSync(enginePath, 'utf-8');
+  const mutated = original.replace(
+    'const tile = engineResolveSpawnFootTile(collisionMap, room, walkableFallback);',
+    'const tile = { x: 0, y: collisionMap.height - 1 };'
+  );
+  assert.notStrictEqual(mutated, original);
+  fs.writeFileSync(enginePath, mutated);
+  try {
+    let threw = false;
+    try {
+      runGameSpawnProbe();
+    } catch {
+      threw = true;
+    }
+    assert.ok(threw, 'forcing bottom row in engineGameSpawnFootTile must fail probe');
+  } finally {
+    fs.writeFileSync(enginePath, original);
+  }
+});
+
 test('mutation forced spawn {0,height-1} is invalid spawn', () => {
   const code = `
     const { isValidSpawnPosition } = require('./src/spawnGuard.ts');
