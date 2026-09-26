@@ -23,6 +23,8 @@ Thumbs.db
 .dashboard/
 public/live-status.json
 
+.tmp-screenshots/
+
 # Logs
 *.log
 npm-debug.log*

@@ -29,6 +29,82 @@ import {
   randomNpcPauseMs,
   truncatePath,
 } from './npcMotion';
+import {
+  executeRenderPasses,
+  AgentRenderInfo,
+  TileRenderInfo,
+} from './renderQueue';
+import {
+  filterOutBottomRow,
+  pickEngineSpawnFootTile,
+  CollisionMap,
+  type Room,
+} from './spawnGuard';
+
+/** Bottom foot-tile row excluded from spawn (engine.ts single source of truth). */
+export function engineSpawnBottomRow(mapHeight: number): number {
+  return mapHeight - 1;
+}
+
+/**
+ * Engine spawn path without preferred tile — used by resolveSpawnFootTile and tests.
+ */
+export function engineResolveSpawnFootTile(
+  collisionMap: CollisionMap,
+  room: Room | null,
+  walkableFallback: TileCoord[]
+): TileCoord | null {
+  const bottomRow = engineSpawnBottomRow(collisionMap.height);
+  const tile = pickEngineSpawnFootTile(collisionMap, room, walkableFallback, bottomRow);
+  if (tile) return tile;
+  const candidates = filterOutBottomRow(walkableFallback, bottomRow);
+  if (candidates.length === 0) return null;
+  const idx = Math.floor(Math.random() * candidates.length);
+  return candidates[idx];
+}
+
+/**
+ * Same resolver + occupied fallback as GameEngine.resolveSpawnFootTile (for behavioural tests).
+ */
+export function engineGameSpawnFootTile(
+  collisionMap: CollisionMap,
+  room: Room | null,
+  walkableFallback: TileCoord[],
+  canOccupyTile: (tile: TileCoord) => boolean
+): TileCoord | null {
+  const tile = engineResolveSpawnFootTile(collisionMap, room, walkableFallback);
+  if (tile && canOccupyTile(tile)) return tile;
+  return engineSpawnOccupiedFallback(collisionMap.height, walkableFallback, canOccupyTile);
+}
+
+/**
+ * Preferred-tile branch of resolveSpawnFootTile (exported for spawn regression tests).
+ */
+export function enginePreferredSpawnFootTile(
+  preferred: TileCoord,
+  mapHeight: number,
+  canOccupyPreferred: boolean
+): TileCoord | null {
+  const bottomRow = engineSpawnBottomRow(mapHeight);
+  if (canOccupyPreferred && preferred.y !== bottomRow) {
+    return preferred;
+  }
+  return null;
+}
+
+/** Occupied-tile shuffle fallback used by engineGameSpawnFootTile / GameEngine. */
+export function engineSpawnOccupiedFallback(
+  mapHeight: number,
+  walkableFallback: TileCoord[],
+  canOccupyTile: (tile: TileCoord) => boolean
+): TileCoord | null {
+  const bottomRow = engineSpawnBottomRow(mapHeight);
+  const shuffled = [...filterOutBottomRow(walkableFallback, bottomRow)].sort(() => Math.random() - 0.5);
+  for (const fallback of shuffled) {
+    if (canOccupyTile(fallback)) return fallback;
+  }
+  return null;
+}
 
 const MOVE_SPEED = 1.15;
 const WORK_MOVE_SPEED = 1.25;
@@ -222,17 +298,39 @@ export class GameEngine {
 
   private resolveSpawnFootTile(agentId: string): TileCoord | null {
     const preferred = gameMap.getAgentSpawnTile(agentId);
-    if (!preferred) return null;
     const agent = this.state.agents.find((a) => a.id === agentId);
-    if (!agent) return preferred;
-    if (this.canOccupyTile(preferred.x, preferred.y, agent)) {
-      return preferred;
+    if (!agent) return preferred ?? null;
+    
+    if (preferred) {
+      const mapHeight = this.mapGrid?.height ?? 0;
+      const picked = enginePreferredSpawnFootTile(
+        preferred,
+        mapHeight || 1,
+        this.canOccupyTile(preferred.x, preferred.y, agent)
+      );
+      if (picked) return picked;
+      return this.findNearestWalkableFootTile(agent, preferred);
     }
-    return this.findNearestWalkableFootTile(agent, preferred);
+    
+    const collisionMap = this.buildCollisionMap();
+    if (!collisionMap) return null;
+
+    const room = gameMap.getRoomForAgent(agentId) ?? null;
+    const walkables = this.getAllWalkableTiles(agent);
+    return engineGameSpawnFootTile(collisionMap, room, walkables, (t) =>
+      this.canOccupyTile(t.x, t.y, agent)
+    );
   }
 
   private findNearestWalkableFootTile(agent: Agent, preferred: TileCoord): TileCoord | null {
-    const candidates = this.getWalkableTilesInRoom(agent);
+    // Try room tiles first, fall back to all walkable tiles if agent has no room
+    let candidates = this.getWalkableTilesInRoom(agent);
+    if (candidates.length === 0) {
+      candidates = this.getAllWalkableTiles(agent);
+    }
+    // Filter out bottom row (reserved for map edge)
+    const bottomRow = this.mapGrid ? engineSpawnBottomRow(this.mapGrid.height) : -1;
+    candidates = filterOutBottomRow(candidates, bottomRow);
     if (candidates.length === 0) return null;
     let best = candidates[0];
     let bestDist = Number.POSITIVE_INFINITY;
@@ -391,6 +489,12 @@ export class GameEngine {
     return { x: tileXs[0], y: footTileY };
   }
 
+  /** Per-agent feet Y position in pixels, used for depth sorting. */
+  private agentFeetY(agent: Agent): number {
+    const size = this.renderer.spritePixelSize(agent.id);
+    return agent.y + size.height;
+  }
+
   private canEnterFootTile(tileX: number, footTileY: number, agent: Agent): boolean {
     if (this.mapGrid && !this.mapGrid.isBlockedForFootprint([tileX], footTileY)) {
       return true;
@@ -405,6 +509,17 @@ export class GameEngine {
   private canOccupyTile(tileX: number, footTileY: number, agent: Agent): boolean {
     const pos = this.spawnPixels(this.renderer.getLayout(), tileX, footTileY, agent.id);
     return this.canOccupy(agent, pos.x, pos.y) && this.canEnterFootTile(tileX, footTileY, agent);
+  }
+
+  private buildCollisionMap(): CollisionMap | null {
+    if (!this.mapGrid) return null;
+    const blocked: number[] = [];
+    for (let y = 0; y < this.mapGrid.height; y++) {
+      for (let x = 0; x < this.mapGrid.width; x++) {
+        blocked.push(this.mapGrid.isBlockedForFootprint([x], y) ? 1 : 0);
+      }
+    }
+    return { width: this.mapGrid.width, height: this.mapGrid.height, blocked };
   }
 
   private setAgentsIdleAtCurrentPosition(): void {
@@ -866,46 +981,32 @@ export class GameEngine {
     this.renderer.drawAgentConnections(this.state.agents);
     
     const layout = this.renderer.getLayout();
-    const spriteHeight = this.renderer.spritePixelSize().height;
-    type DrawItem = { sortY: number; order: number; draw: () => void };
-    const queue: DrawItem[] = [];
-    const DRAW_SHADOW = -20;
-    const DRAW_MID = -10;
-    const DRAW_WALKOVER = 0;
-    const DRAW_AGENT = 10;
-    const DRAW_WALLS_FRONT = 20;
+    
+    // Rendering order (see renderQueue.ts for layer constants):
+    //   1. Background (floor/grass/walls) - baked into mapBackground, drawn by clear()
+    //   2. Furniture-low (walkover) - walkable tiles drawn under avatar
+    //   3. ALL SHADOWS - separate pass, always under furniture-mid/wall-front
+    //   4. Depth-sorted queue: furniture-mid, avatars
+    //   5. Wall-front - ALWAYS on top of avatars and shadows
+    //   6. Overlay (furniture-high) - always on top of everything
+    //
+    // Shadow rule: shadows are drawn in their own pass BEFORE the depth-sorted
+    // queue, so they are ALWAYS under furniture-mid and wall-front regardless
+    // of Y position. Shadows sit on top of floor/grass/furniture-low only.
+    //
+    // Wall-front rule: wall-front tiles are drawn AFTER the depth-sorted queue,
+    // so they are ALWAYS on top of avatars and their shadows.
 
+    // Build agent render info with per-agent feet positions
+    const agents: AgentRenderInfo[] = [];
     for (const agent of this.state.agents) {
       if (!this.isAgentDrawn(agent)) continue;
-      queue.push({
-        sortY: agent.y + spriteHeight,
-        order: DRAW_SHADOW,
-        draw: () => this.renderer.drawAgentShadow(agent),
-      });
-    }
-
-    for (const { x, y } of this.renderer.getMidTiles()) {
-      queue.push({
-        sortY: this.renderer.tileFootSortY(layout, y),
-        order: DRAW_MID,
-        draw: () => this.renderer.drawMidTile(layout, x, y),
-      });
-    }
-
-    for (const { x, y } of this.renderer.getWalkoverTiles()) {
-      queue.push({
-        sortY: this.renderer.tileFootSortY(layout, y),
-        order: DRAW_WALKOVER,
-        draw: () => this.renderer.drawWalkoverTile(layout, x, y),
-      });
-    }
-
-    for (const agent of this.state.agents) {
-      if (!this.isAgentDrawn(agent)) continue;
-      queue.push({
-        sortY: agent.y + spriteHeight,
-        order: DRAW_AGENT,
-        draw: () =>
+      const feetY = this.agentFeetY(agent);
+      agents.push({
+        id: agent.id,
+        feetY,
+        drawShadow: () => this.renderer.drawAgentShadow(agent),
+        drawAgent: () =>
           this.renderer.drawAgent(
             agent,
             agent.id === this.state.selectedAgent,
@@ -914,20 +1015,39 @@ export class GameEngine {
       });
     }
 
-    for (const { x, y } of this.renderer.getWallsFrontTiles()) {
-      queue.push({
+    // Build tile render info
+    const walkoverTiles: TileRenderInfo[] = this.renderer
+      .getWalkoverTiles()
+      .map(({ x, y }) => ({
+        coord: { x, y },
         sortY: this.renderer.tileFootSortY(layout, y),
-        order: DRAW_WALLS_FRONT,
+        draw: () => this.renderer.drawWalkoverTile(layout, x, y),
+      }));
+
+    const midTiles: TileRenderInfo[] = this.renderer
+      .getMidTiles()
+      .map(({ x, y }) => ({
+        coord: { x, y },
+        sortY: this.renderer.tileFootSortY(layout, y),
+        draw: () => this.renderer.drawMidTile(layout, x, y),
+      }));
+
+    const wallsFrontTiles: TileRenderInfo[] = this.renderer
+      .getWallsFrontTiles()
+      .map(({ x, y }) => ({
+        coord: { x, y },
+        sortY: this.renderer.tileFootSortY(layout, y),
         draw: () => this.renderer.drawWallsFrontTile(layout, x, y),
-      });
-    }
+      }));
 
-    queue.sort((a, b) => (a.sortY !== b.sortY ? a.sortY - b.sortY : a.order - b.order));
-    for (const item of queue) {
-      item.draw();
-    }
-
-    this.renderer.drawMapOverlay(layout);
+    // Execute render passes (see renderQueue.ts for pass order)
+    executeRenderPasses(
+      agents,
+      walkoverTiles,
+      midTiles,
+      wallsFrontTiles,
+      () => this.renderer.drawMapOverlay(layout)
+    );
 
     if (this.state.selectedAgent) {
       const agent = this.state.agents.find((a) => a.id === this.state.selectedAgent);
@@ -1355,5 +1475,48 @@ export class GameEngine {
   
   selectAgent(agentId: string | null): void {
     this.state.selectedAgent = agentId;
+  }
+
+  /** Dev/screenshot: pin agent foot tile and pause wandering. */
+  pinAgentAtFootTile(
+    agentId: string,
+    tileX: number,
+    tileY: number,
+    facing: 'left' | 'right' | 'up' | 'down' = 'down'
+  ): void {
+    const agent = this.getAgent(agentId);
+    if (!agent) return;
+    if (!this.canEnterFootTile(tileX, tileY, agent)) {
+      console.warn(
+        `[debugPin] blocked foot tile (${tileX}, ${tileY}) for ${agentId}; pin skipped`
+      );
+      return;
+    }
+    agent.visibleOnMap = true;
+    this.agentDismissing.delete(agentId);
+    this.agentTerminalMarch.delete(agentId);
+    this.agentTilePaths.set(agentId, []);
+    const layout = this.renderer.getLayout();
+    const pos = this.spawnPixels(layout, tileX, tileY, agentId);
+    agent.x = pos.x;
+    agent.y = pos.y;
+    agent.targetX = pos.x;
+    agent.targetY = pos.y;
+    agent.direction = facing;
+    agent.locomotion = 'stand';
+    agent.frame = 0;
+    agent.status = 'idle';
+    this.wanderTimers.set(agentId, Number.MAX_SAFE_INTEGER);
+  }
+
+  getMapLayout(): MapLayout {
+    return this.renderer.getLayout();
+  }
+
+  /** Dev/screenshot: show only listed agents (null = show all). */
+  setDebugAgentVisibility(visibleIds: string[] | null): void {
+    for (const agent of this.state.agents) {
+      agent.visibleOnMap = visibleIds === null || visibleIds.includes(agent.id);
+    }
   }
 }
