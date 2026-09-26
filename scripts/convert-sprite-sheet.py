@@ -4,6 +4,8 @@ Convert 93x87 (4-col x 3-row) sprite sheets to 144x32 strip format.
 One uniform scale per sheet (widest frame sets scale); feet bottom-aligned.
 """
 
+from __future__ import annotations
+
 import argparse
 import sys
 from pathlib import Path

@@ -291,5 +291,105 @@ test('full workflow: cloud agent starts, runs, finishes', () => {
   assertEqual(runStatusToAgentStatus(finishedRun).status, 'idle');
 });
 
+console.log('\n--- mapCloudAgentPollItems (vite poll mapping) ---\n');
+
+let mapCloudAgentPollItems;
+let buildPolledCloudAgentStatus;
+try {
+  const tsxPath = path.resolve(__dirname, '../node_modules/.bin/tsx');
+  const viteConfigPath = path.resolve(__dirname, '../vite.config.ts');
+
+  const verifyCode = `
+    import { mapCloudAgentPollItems, buildPolledCloudAgentStatus } from '${viteConfigPath.replace(/\\/g, '/')}';
+    console.log(JSON.stringify({
+      hasMap: typeof mapCloudAgentPollItems === 'function',
+      hasBuild: typeof buildPolledCloudAgentStatus === 'function',
+    }));
+  `;
+  const verifyResult = execSync(`"${tsxPath}" -e "${verifyCode.replace(/"/g, '\\"').replace(/\n/g, ' ')}"`, {
+    encoding: 'utf-8',
+    cwd: path.resolve(__dirname, '..'),
+  });
+  const verifyParsed = JSON.parse(verifyResult.trim());
+  if (!verifyParsed.hasMap || !verifyParsed.hasBuild) {
+    throw new Error('vite poll mapping exports missing');
+  }
+
+  mapCloudAgentPollItems = (items, config) => {
+    const code = `
+      import { mapCloudAgentPollItems } from '${viteConfigPath.replace(/\\/g, '/')}';
+      const items = ${JSON.stringify(items)};
+      const config = ${JSON.stringify(config)};
+      const { avatarCache, idCache } = mapCloudAgentPollItems(items, config);
+      console.log(JSON.stringify({
+        avatar: Object.fromEntries(avatarCache),
+        byId: Object.fromEntries(idCache),
+      }));
+    `;
+    const res = execSync(`"${tsxPath}" -e "${code.replace(/"/g, '\\"').replace(/\n/g, ' ')}"`, {
+      encoding: 'utf-8',
+      cwd: path.resolve(__dirname, '..'),
+    });
+    const parsed = JSON.parse(res.trim());
+    return { avatarCache: parsed.avatar, idCache: parsed.byId };
+  };
+
+  buildPolledCloudAgentStatus = (agent, runStatus, detail) => {
+    const code = `
+      import { buildPolledCloudAgentStatus } from '${viteConfigPath.replace(/\\/g, '/')}';
+      console.log(JSON.stringify(buildPolledCloudAgentStatus(
+        ${JSON.stringify(agent)},
+        ${JSON.stringify(runStatus)},
+        ${JSON.stringify(detail)}
+      )));
+    `;
+    const res = execSync(`"${tsxPath}" -e "${code.replace(/"/g, '\\"').replace(/\n/g, ' ')}"`, {
+      encoding: 'utf-8',
+      cwd: path.resolve(__dirname, '..'),
+    });
+    return JSON.parse(res.trim());
+  };
+
+  console.log('✓ Successfully imported vite poll mapping helpers\n');
+} catch (e) {
+  console.error('FATAL: Failed to import poll mapping from vite.config.ts');
+  console.error('Error:', e.message);
+  process.exit(1);
+}
+
+test('buildPolledCloudAgentStatus sets cloudAgentName (no ReferenceError)', () => {
+  const status = buildPolledCloudAgentStatus(
+    { id: 'bc-friday', name: 'F.R.I.D.A.Y. cloud run' },
+    'idle',
+    'Cloud agent idle'
+  );
+  assertEqual(status.cloudAgentName, 'F.R.I.D.A.Y. cloud run');
+  assertEqual(status.cloudAgentId, 'bc-friday');
+});
+
+test('poll mapping: named F.R.I.D.A.Y. maps to friday avatar', () => {
+  const items = [
+    { id: 'bc-friday', name: 'F.R.I.D.A.Y. troubleshooting' },
+  ];
+  const { avatarCache, idCache } = mapCloudAgentPollItems(items, testConfig);
+  assertEqual(avatarCache.friday?.cloudAgentName, 'F.R.I.D.A.Y. troubleshooting');
+  assertEqual(idCache['bc-friday']?.cloudAgentName, 'F.R.I.D.A.Y. troubleshooting');
+});
+
+test('poll mapping: unmatched agent uses cursor-cloud catch-all avatar', () => {
+  const items = [
+    { id: 'bc-unknown', name: 'Random one-off cloud task' },
+  ];
+  const { avatarCache, idCache } = mapCloudAgentPollItems(items, testConfig);
+  assertEqual(avatarCache['cursor-cloud']?.cloudAgentName, 'Random one-off cloud task');
+  assertEqual(idCache['bc-unknown']?.cloudAgentId, 'bc-unknown');
+});
+
+test('poll mapping: Bumblebee name maps to bumblebee avatar', () => {
+  const items = [{ id: 'bc-bee', name: 'Bumblebee Protocol Runner' }];
+  const { avatarCache } = mapCloudAgentPollItems(items, testConfig);
+  assertEqual(avatarCache.bumblebee?.cloudAgentName, 'Bumblebee Protocol Runner');
+});
+
 console.log(`\n=== Results: ${passed} passed, ${failed} failed ===\n`);
 process.exit(failed > 0 ? 1 : 0);
