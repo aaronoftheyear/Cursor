@@ -1,7 +1,59 @@
 import { Agent } from './types';
 import { AGENT_SPRITES, SPRITE_SIZE } from './sprites';
-import { emeraldDisplaySize, getAgentSpriteMirror, getSpriteFrame, LoadedSprite } from './assets';
+import {
+  agentClickBoxBounds,
+  agentShadowEllipseRadii,
+  renderedCharacterHeightFromVisible,
+  spritePixelSizeFromFrames,
+} from './agentDisplayMath';
+import { assetLoader, getAgentSpriteMirror, getSpriteFrame, LoadedSprite, type AssetManifest } from './assets';
 import { gameMap } from './map';
+
+/** Renderer wiring: manifest displayScale → spritePixelSizeFromFrames (tested). */
+export function resolveAgentSpritePixelSize(
+  agentId: string,
+  manifest: AssetManifest | null,
+  frameWidth: number,
+  frameHeight: number,
+  tile: number
+): { width: number; height: number } {
+  const displayScale = manifest?.agents[agentId]?.displayScale ?? 1;
+  return spritePixelSizeFromFrames(frameWidth, frameHeight, tile, displayScale);
+}
+
+/** Visible character height on screen (non-transparent bbox × emerald scale × displayScale). */
+export function resolveAgentShadowRadii(
+  agentId: string,
+  spriteSize: { width: number; height: number },
+  tile: number,
+  manifest: AssetManifest | null,
+  shadowScale = 1
+): { radiusX: number; radiusY: number } {
+  const clickBoxTiles = manifest?.agents[agentId]?.clickBoxTiles;
+  return agentShadowEllipseRadii(spriteSize, tile, clickBoxTiles, shadowScale);
+}
+
+export function resolveAgentVisibleRenderHeight(
+  agentId: string,
+  manifest: AssetManifest | null,
+  visiblePixelHeight: number,
+  frameHeight: number,
+  tile: number
+): number {
+  const displayScale = manifest?.agents[agentId]?.displayScale ?? 1;
+  return renderedCharacterHeightFromVisible(visiblePixelHeight, frameHeight, tile, displayScale);
+}
+
+/** Renderer wiring: manifest clickBoxTiles → agentClickBoxBounds (tested). */
+export function resolveAgentClickBox(
+  agent: Agent,
+  manifest: AssetManifest | null,
+  spriteSize: { width: number; height: number },
+  tile: number
+): { x: number; y: number; width: number; height: number } {
+  const clickBoxTiles = manifest?.agents[agent.id]?.clickBoxTiles;
+  return agentClickBoxBounds(agent.x, agent.y, spriteSize, tile, clickBoxTiles);
+}
 
 export interface MapLayout {
   tile: number;
@@ -141,10 +193,26 @@ export class Renderer {
   spritePixelSize(agentId?: string): { width: number; height: number } {
     const tile = this.getLayout().tile;
     const custom = agentId ? this.sprites.get(agentId) : undefined;
-    if (custom) {
-      return emeraldDisplaySize(custom.frameWidth, custom.frameHeight, tile);
+    const frameWidth = custom?.frameWidth ?? 16;
+    const frameHeight = custom?.frameHeight ?? 32;
+    const manifest = assetLoader.getManifest();
+    if (!agentId) {
+      return spritePixelSizeFromFrames(frameWidth, frameHeight, tile, 1);
     }
-    return emeraldDisplaySize(16, 32, tile);
+    return resolveAgentSpritePixelSize(agentId, manifest, frameWidth, frameHeight, tile);
+  }
+  
+  private getShadowScale(agentId: string): number {
+    const manifest = assetLoader.getManifest();
+    return manifest?.agents[agentId]?.shadowScale ?? 1;
+  }
+
+  shadowRadiiForAgent(agent: Agent): { radiusX: number; radiusY: number } {
+    const size = this.agentDrawSize(agent);
+    const manifest = assetLoader.getManifest();
+    const tile = this.getLayout().tile;
+    const shadowScale = this.getShadowScale(agent.id);
+    return resolveAgentShadowRadii(agent.id, size, tile, manifest, shadowScale);
   }
 
   isAgentMoving(agent: Agent): boolean {
@@ -296,13 +364,24 @@ export class Renderer {
   
   drawAgentShadow(agent: Agent): void {
     const size = this.agentDrawSize(agent);
+    const manifest = assetLoader.getManifest();
+    const tile = this.getLayout().tile;
+    const shadowScale = this.getShadowScale(agent.id);
+    const clickBoxTiles = manifest?.agents[agent.id]?.clickBoxTiles;
+    const { radiusX, radiusY } = agentShadowEllipseRadii(
+      size,
+      tile,
+      clickBoxTiles,
+      shadowScale
+    );
+
     this.ctx.fillStyle = 'rgba(0, 0, 0, 0.3)';
     this.ctx.beginPath();
     this.ctx.ellipse(
       agent.x + size.width / 2,
       agent.y + size.height,
-      size.width / 3,
-      size.width / 6,
+      radiusX,
+      radiusY,
       0,
       0,
       Math.PI * 2
@@ -566,13 +645,20 @@ export class Renderer {
   getAgentAtPosition(agents: Agent[], x: number, y: number): Agent | null {
     for (const agent of agents) {
       if (agent.visibleOnMap === false) continue;
-      const { width: spriteWidth, height: spriteHeight } = this.spritePixelSize(agent.id);
-      if (x >= agent.x && x <= agent.x + spriteWidth &&
-          y >= agent.y && y <= agent.y + spriteHeight) {
+      const clickBox = this.agentClickBox(agent);
+      if (x >= clickBox.x && x <= clickBox.x + clickBox.width &&
+          y >= clickBox.y && y <= clickBox.y + clickBox.height) {
         return agent;
       }
     }
     
     return null;
+  }
+
+  agentClickBox(agent: Agent): { x: number; y: number; width: number; height: number } {
+    const manifest = assetLoader.getManifest();
+    const tile = this.getLayout().tile;
+    const spriteSize = this.spritePixelSize(agent.id);
+    return resolveAgentClickBox(agent, manifest, spriteSize, tile);
   }
 }

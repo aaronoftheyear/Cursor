@@ -59,9 +59,16 @@ class AIAgentDashboard {
       for (const part of pin.split(';')) {
         const [agentId, coords] = part.split('@');
         if (!agentId || !coords) continue;
-        const [tx, ty] = coords.split(',').map((n) => parseInt(n, 10));
+        const parts = coords.split(',').map((s) => s.trim());
+        const tx = parseInt(parts[0], 10);
+        const ty = parseInt(parts[1], 10);
+        const facingRaw = parts[2];
+        const facing =
+          facingRaw === 'left' || facingRaw === 'right' || facingRaw === 'up' || facingRaw === 'down'
+            ? facingRaw
+            : 'down';
         if (Number.isFinite(tx) && Number.isFinite(ty)) {
-          this.engine.pinAgentAtFootTile(agentId.trim(), tx, ty);
+          this.engine.pinAgentAtFootTile(agentId.trim(), tx, ty, facing);
         }
       }
     };

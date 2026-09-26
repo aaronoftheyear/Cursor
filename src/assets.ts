@@ -18,6 +18,12 @@ export interface AgentAssets {
   portrait: string;
   /** emerald = left column mirrored for right; right = art faces right (mirror for left). */
   spriteFacing?: 'emerald' | 'right';
+  /** Scale factor for display size (default 1.0). Use 0.5 for sprites with larger frame cells. */
+  displayScale?: number;
+  /** Scale factor for shadow size (default 1.0). Use 0.5 for sprites with larger frame cells. */
+  shadowScale?: number;
+  /** Click box size in tiles. Defaults to sprite pixel size if not set. */
+  clickBoxTiles?: { width: number; height: number };
 }
 
 export interface TilesetAssets {
@@ -71,6 +77,7 @@ function inferSpriteSheetLayout(
     [32, 32],
     [36, 32],
     [48, 48],
+    [64, 64],
   ];
   for (const [frameWidth, frameHeight] of cellSizes) {
     if (width % frameWidth !== 0 || height % frameHeight !== 0) continue;
@@ -258,6 +265,11 @@ class AssetLoader {
   getManifest(): AssetManifest | null {
     return this.manifest;
   }
+
+  /** Test hook: inject manifest without fetch (Renderer wiring tests). */
+  setManifestForTests(manifest: AssetManifest | null): void {
+    this.manifest = manifest;
+  }
   
   getSpriteSize(): number {
     return this.manifest?.spriteSize ?? 32;
@@ -269,6 +281,10 @@ class AssetLoader {
 }
 
 export const assetLoader = new AssetLoader();
+
+export function setAssetManifestForTests(manifest: AssetManifest | null): void {
+  assetLoader.setManifestForTests(manifest);
+}
 
 /**
  * 144×32 strip frame order.

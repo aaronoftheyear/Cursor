@@ -64,6 +64,7 @@ interface AgentLinksConfig {
     };
     cloud?: {
       agentNameContains?: string[];
+      catchAll?: boolean;
     };
   }>;
 }
@@ -137,17 +138,23 @@ async function getLatestRunStatus(apiKey: string, agentId: string, runId: string
   return (await res.json()) as CursorRun;
 }
 
-function matchAgentToAvatar(
+export function matchAgentToAvatar(
   agent: CursorAgent,
   config: AgentLinksConfig
 ): string | null {
   const agentName = (agent.name || '').toLowerCase();
+  let catchAllAvatar: string | null = null;
 
   for (const [avatarId, spec] of Object.entries(config.agents)) {
     if (avatarId === 'jarvis') continue;
 
     const cloudSpec = spec.cloud || spec.cursor;
     if (!cloudSpec) continue;
+
+    if (spec.cloud?.catchAll) {
+      catchAllAvatar = avatarId;
+      continue;
+    }
 
     const nameHints = cloudSpec.agentNameContains || [];
     for (const hint of nameHints) {
@@ -157,10 +164,10 @@ function matchAgentToAvatar(
     }
   }
 
-  return null;
+  return catchAllAvatar;
 }
 
-function runStatusToAgentStatus(run: CursorRun | null, agent: CursorAgent): CloudAgentStatus {
+export function runStatusToAgentStatus(run: CursorRun | null, agent: CursorAgent): CloudAgentStatus {
   const base: CloudAgentStatus = {
     status: 'idle',
     source: 'cloud-api',

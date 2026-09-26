@@ -179,6 +179,19 @@ export const AGENT_CONFIGS: Omit<
     sprite: AGENT_SPRITES.stand,
     role: 'coordinator',
   },
+  {
+    id: 'cursor-cloud',
+    name: 'Cursor Cloud',
+    description: 'Catch-all avatar for Cursor cloud agents that don\'t match specific avatars like F.R.I.D.A.Y. or Bumblebee.',
+    color: '#6366f1',
+    secondaryColor: '#4f46e5',
+    status: 'idle',
+    direction: 'down',
+    specialties: ['cloud', 'background', 'autonomous', 'remote'],
+    sprite: AGENT_SPRITES.stand,
+    role: 'subagent',
+    parentAgent: 'friday',
+  },
 ];
 
 export function createAgents(canvasWidth: number, canvasHeight: number): Agent[] {

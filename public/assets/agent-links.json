@@ -72,6 +72,12 @@
         "payloadContains": [],
         "agentNameContains": []
       }
+    },
+    "cursor-cloud": {
+      "label": "Cursor Cloud (catch-all)",
+      "cloud": {
+        "catchAll": true
+      }
     }
   }
 }

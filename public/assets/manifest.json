@@ -8,82 +8,109 @@
       "name": "J.A.R.V.I.S.",
       "sprite": "sprites/jarvis.png",
       "idle": "sprites/jarvis.png",
-      "portrait": "sprites/jarvis.png"
+      "portrait": "sprites/jarvis.png",
+      "displayScale": 1.0
     },
     "friday": {
       "name": "F.R.I.D.A.Y.",
       "sprite": "sprites/friday.png",
       "idle": "sprites/friday.png",
-      "portrait": "sprites/friday.png"
+      "portrait": "sprites/friday.png",
+      "displayScale": 1.0
     },
     "bumblebee": {
       "name": "Bumblebee",
       "sprite": "sprites/bumblebee.png",
       "idle": "sprites/bumblebee.png",
-      "portrait": "sprites/bumblebee.png"
+      "portrait": "sprites/bumblebee.png",
+      "displayScale": 1.0
     },
     "cursor": {
       "name": "Cursor",
       "sprite": "sprites/cursor_grunt01.png",
       "idle": "sprites/cursor_grunt01.png",
-      "portrait": "sprites/cursor_grunt01.png"
+      "portrait": "sprites/cursor_grunt01.png",
+      "displayScale": 1.0
     },
     "cursor-grunt": {
       "name": "Cursor Grunt 2",
       "sprite": "sprites/cursor_grunt02.png",
       "idle": "sprites/cursor_grunt02.png",
-      "portrait": "sprites/cursor_grunt02.png"
+      "portrait": "sprites/cursor_grunt02.png",
+      "displayScale": 0.91
     },
     "claude": {
       "name": "Claude",
       "sprite": "sprites/claude.png",
       "idle": "sprites/claude.png",
       "portrait": "sprites/claude.png",
-      "spriteFacing": "right"
+      "spriteFacing": "right",
+      "displayScale": 1.0
     },
     "claude-code": {
       "name": "Claude Code",
       "sprite": "sprites/claude_code.png",
       "idle": "sprites/claude_code.png",
       "portrait": "sprites/claude_code.png",
-      "spriteFacing": "right"
+      "spriteFacing": "right",
+      "displayScale": 1.05,
+      "displayScaleManual": "Hand-tuned to match Jarvis visible draw height via resolveAgentSpritePixelSize."
     },
     "claude-cowork": {
       "name": "Claude Cowork",
       "sprite": "sprites/claude_cowork.png",
       "idle": "sprites/claude_cowork.png",
       "portrait": "sprites/claude_cowork.png",
-      "spriteFacing": "right"
+      "spriteFacing": "right",
+      "displayScale": 1.0
     },
     "grokbot": {
       "name": "Grok",
       "sprite": "sprites/grok.png",
       "idle": "sprites/grok.png",
-      "portrait": "sprites/grok.png"
+      "portrait": "sprites/grok.png",
+      "displayScale": 1.09,
+      "displayScaleManual": "Hand-tuned ~93% Jarvis visible down height at tile 37."
     },
     "metabee": {
       "name": "Metabee",
       "sprite": "sprites/metabee.png",
       "idle": "sprites/metabee.png",
-      "portrait": "sprites/metabee.png"
+      "portrait": "sprites/metabee.png",
+      "displayScale": 1.12,
+      "displayScaleManual": "Hand-tuned ~90% Jarvis visible down height at tile 37."
     },
     "gemini": {
       "name": "Gemini",
       "sprite": "sprites/gemini.png",
       "idle": "sprites/gemini.png",
-      "portrait": "sprites/gemini.png"
+      "portrait": "sprites/gemini.png",
+      "displayScale": 1.0
     },
     "apple-intelligence": {
       "name": "Apple Intelligence",
       "sprite": "sprites/apple.png",
       "idle": "sprites/apple.png",
-      "portrait": "sprites/apple.png"
+      "portrait": "sprites/apple.png",
+      "displayScale": 1.05,
+      "displayScaleManual": "Hand-tuned ~95% Jarvis visible down height at tile 37."
     },
     "laya": {
       "name": "Laya",
       "sprite": "sprites/laya.png",
       "idle": "sprites/laya.png",
-      "portrait": "sprites/laya.png"
+      "portrait": "sprites/laya.png",
+      "displayScale": 1.0
+    },
+    "cursor-cloud": {
+      "name": "Cursor Cloud",
+      "sprite": "sprites/cursor-cloud.png",
+      "idle": "sprites/cursor-cloud.png",
+      "portrait": "sprites/cursor-cloud.png",
+      "displayScale": 0.85,
+      "displayScaleManual": "Hand-tuned ~100% Jarvis visible down height at tile 37 (64px sheet).",
+      "shadowScale": 1.0,
+      "clickBoxTiles": { "width": 1, "height": 2 }
     }
   },
   "tileset": {

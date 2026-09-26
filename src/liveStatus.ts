@@ -55,6 +55,12 @@ export interface AgentLinksConfig {
         /** Match subagent / cloud agent name fields. */
         agentNameContains?: string[];
       };
+      cloud?: {
+        /** Match subagent / cloud agent name fields. */
+        agentNameContains?: string[];
+        /** True if this avatar is a catch-all for unmatched cloud agents. */
+        catchAll?: boolean;
+      };
     }
   >;
 }
