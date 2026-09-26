@@ -33,22 +33,32 @@ async function measureVisible(agentId, manifest, projectRoot) {
   const png = PNG.sync.read(fs.readFileSync(p));
   const fw = png.width === 144 ? 16 : 64;
   const fh = png.width === 144 ? 32 : 64;
+  const frameY0 = png.width === 256 && png.height === 256 ? 0 : 0;
   let minY = fh;
   let maxY = -1;
   for (let y = 0; y < fh; y++) {
     for (let x = 0; x < fw; x++) {
-      if (png.data[y * png.width * 4 + x * 4 + 3] > 0) {
+      const py = frameY0 + y;
+      if (png.data[(py * png.width + x) * 4 + 3] > 0) {
         minY = Math.min(minY, y);
         maxY = Math.max(maxY, y);
       }
     }
   }
   const vis = maxY >= minY ? maxY - minY + 1 : 0;
+  const displayScale = cfg.displayScale ?? 1;
   const tsx = path.join(projectRoot, 'node_modules/.bin/tsx');
   const code = `const r=require('./src/renderer.ts');const m=${JSON.stringify(manifest)};const s=r.resolveAgentSpritePixelSize('${agentId}',m,${fw},${fh},${TILE});console.log(${vis}*(s.height/${fh}))`;
-  const h = parseFloat(
-    execSync(`"${tsx}" -e "${code.replace(/"/g, '\\"')}"`, { cwd: projectRoot, encoding: 'utf-8' })
-  );
+  let h;
+  try {
+    h = parseFloat(
+      execSync(`"${tsx}" -e "${code.replace(/"/g, '\\"')}"`, { cwd: projectRoot, encoding: 'utf-8' })
+    );
+  } catch {
+    // origin/main: emerald draw height = tile*2*displayScale (no resolveAgentSpritePixelSize)
+    const drawH = Math.round(TILE * 2 * displayScale);
+    h = vis * (drawH / fh);
+  }
   return { vis, h };
 }
 

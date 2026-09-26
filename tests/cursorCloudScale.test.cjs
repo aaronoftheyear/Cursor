@@ -62,6 +62,37 @@ test('cursor-cloud manifest has displayScale and clickBoxTiles', () => {
   assert.ok(cursorCloud.clickBoxTiles);
 });
 
+test('cursor-cloud idle visible height matches in all four directions', () => {
+  const PNG = require('pngjs').PNG;
+  const spritePath = path.resolve(__dirname, '../public/assets/sprites/cursor-cloud.png');
+  const png = PNG.sync.read(fs.readFileSync(spritePath));
+  assert.strictEqual(png.width, 256);
+  assert.strictEqual(png.height, 256);
+  const fw = 64;
+  const rows = { down: 0, left: 1, right: 2, up: 3 };
+  const heights = {};
+  for (const [dir, row] of Object.entries(rows)) {
+    let minY = fw;
+    let maxY = -1;
+    const y0 = row * fw;
+    for (let y = 0; y < fw; y++) {
+      for (let x = 0; x < fw; x++) {
+        const a = png.data[((y0 + y) * png.width + x) * 4 + 3];
+        if (a > 0) {
+          minY = Math.min(minY, y);
+          maxY = Math.max(maxY, y);
+        }
+      }
+    }
+    heights[dir] = maxY >= minY ? maxY - minY + 1 : 0;
+  }
+  const spread = Math.max(...Object.values(heights)) - Math.min(...Object.values(heights));
+  assert.ok(
+    spread <= 1,
+    `cursor-cloud height spread ${spread}px (${JSON.stringify(heights)})`
+  );
+});
+
 test('spritePixelSizeFromFrames: 64x64 + displayScale matches cursor-cloud', () => {
   const size = callMath(
     'spritePixelSizeFromFrames',
